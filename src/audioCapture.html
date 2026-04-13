@@ -209,21 +209,37 @@
           mediaRecorder.stop();
 
           // Wait for MediaRecorder to go inactive (final chunk fires first)
+          // Safety timeout of 5 seconds to avoid hanging forever
           await new Promise((resolve) => {
+            const safetyTimeout = setTimeout(() => {
+              console.warn('[capture] MediaRecorder did not go inactive in 5s — proceeding anyway');
+              resolve();
+            }, 5000);
             const checkInterval = setInterval(() => {
               if (!mediaRecorder || mediaRecorder.state === 'inactive') {
                 clearInterval(checkInterval);
+                clearTimeout(safetyTimeout);
                 resolve();
               }
             }, 50);
           });
         }
+      } catch (err) {
+        console.error('[capture] Stop error during MediaRecorder shutdown:', err);
+        window.audioCaptureAPI.sendError('Stop error: ' + err.message);
+      }
 
-        // Signal main that all chunks have been sent
+      // ALWAYS signal main that we're done, even if MediaRecorder stop threw.
+      // Without this, main process waits for audio-capture-stopped and times out.
+      try {
         window.audioCaptureAPI.sendCaptureStop();
         console.log('[capture] Stop signal sent to main');
+      } catch (ipcErr) {
+        console.error('[capture] Failed to send stop signal:', ipcErr);
+      }
 
-        // Cleanup all streams and context
+      // Cleanup all streams and context (best-effort, don't let errors block)
+      try {
         if (videoStream) {
           videoStream.getTracks().forEach(track => track.stop());
           videoStream = null;
@@ -245,9 +261,8 @@
           audioContext = null;
         }
         mediaRecorder = null;
-      } catch (err) {
-        console.error('[capture] Stop error:', err);
-        window.audioCaptureAPI.sendError('Stop error: ' + err.message);
+      } catch (cleanupErr) {
+        console.error('[capture] Cleanup error:', cleanupErr);
       }
     }
 

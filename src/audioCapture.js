@@ -202,6 +202,7 @@ async function stopCapture() {
     // Wait for the renderer to signal that all chunks have been sent
     const stoppedHandler = () => {
       ipcMain.removeListener('audio-capture-stopped', stoppedHandler);
+      ipcMain.removeListener('audio-capture-error', errorFallbackHandler);
       clearTimeout(timeout);
 
       // Close the write stream and rename temp → final
@@ -220,7 +221,28 @@ async function stopCapture() {
         });
     };
 
+    // Fallback: if the renderer sends an error instead of stopped, treat it
+    // as a termination signal so we don't hang for the full 10s timeout.
+    const errorFallbackHandler = (_event, message) => {
+      console.warn('[audioCapture] Renderer reported error during stop:', message);
+      ipcMain.removeListener('audio-capture-error', errorFallbackHandler);
+      // Give the renderer a brief moment — it may still send stopped after the error
+      setTimeout(() => {
+        // If stoppedHandler already ran, this is a no-op (listener removed)
+        ipcMain.removeListener('audio-capture-stopped', stoppedHandler);
+        clearTimeout(timeout);
+        _closeWriteStream();
+        if (captureWindow) {
+          captureWindow.destroy();
+          captureWindow = null;
+        }
+        isReady = false;
+        reject(new Error('Capture renderer error: ' + message));
+      }, 500);
+    };
+
     ipcMain.once('audio-capture-stopped', stoppedHandler);
+    ipcMain.on('audio-capture-error', errorFallbackHandler);
 
     // Send stop signal to renderer
     if (captureWindow && !captureWindow.isDestroyed()) {

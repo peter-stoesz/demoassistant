@@ -4,6 +4,19 @@
 
 ---
 
+## 2026-04-13 — Fix Audio Capture Timeout on Stop
+
+**Problem:** Clicking Stop produced `"Audio capture timeout"` after 10 seconds. The renderer's `stopCapture()` wrapped the entire function — including the `sendCaptureStop()` IPC call — in a single try/catch. If anything threw (MediaRecorder shutdown, stream cleanup), the catch block sent `audio-capture-error` but never sent `audio-capture-stopped`. The main process only listened for `audio-capture-stopped`, so it waited the full 10s and timed out.
+**Secondary issue:** The polling loop waiting for `mediaRecorder.state === 'inactive'` had no timeout — if the MediaRecorder hung, the renderer polled forever.
+
+**Changes:**
+- `src/audioCapture.html`: Restructured `stopCapture()` so the `sendCaptureStop()` call is ALWAYS reached regardless of whether MediaRecorder shutdown throws. Added a 5-second safety timeout to the MediaRecorder inactive-polling loop. Stream cleanup is now best-effort in its own try/catch.
+- `src/audioCapture.js`: Added `audio-capture-error` as a fallback termination signal in `stopCapture()` so a renderer error triggers cleanup within 500ms instead of waiting the full 10s timeout.
+
+**Files modified:** `src/audioCapture.html`, `src/audioCapture.js`
+
+---
+
 ## 2026-04-13 — Fix Recording Stop Failure and State Machine Deadlock
 
 **Problem:** Clicking "Stop" would fail silently, leaving the state machine stuck at `STOPPING`. Because `onProcessingComplete()` only transitions from `PROCESSING` → `IDLE`, and a failed `stopCapture()` never reaches `PROCESSING`, the state was permanently stuck — blocking all future recordings.
