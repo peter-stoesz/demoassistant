@@ -463,5 +463,7 @@ module.exports = {
   getTempFiles,
   recoverTempFile,
   deleteTempFile,
-  TEMP_PREFIX
+  TEMP_PREFIX,
+  // Exposed for startup pre-flight check
+  _resolveFfmpegPath
 };

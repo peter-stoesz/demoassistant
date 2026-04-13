@@ -603,16 +603,24 @@ async function stopRecordingFlow() {
 
     const shouldTranscribe = transcriptionConfig.get('autoTranscribe') !== false;
     if (shouldTranscribe && transcriptionQueue) {
-      // Use the WAV file for transcription (16kHz mono, ideal for Whisper).
-      // Fall back to the raw WebM if WAV conversion failed.
+      // Check if the audio file actually exists before enqueuing
       const transcriptionFile = wavFilePath || captureResult.filePath;
-      transcriptionQueue.enqueue({
-        transcriptId: entry.id,
-        audioFilePath: transcriptionFile,
-        opportunityId: stopResult.opportunityId,
-        options: {}
-      });
-      console.log('[main] Transcription enqueued using:', transcriptionFile);
+      if (!fs.existsSync(transcriptionFile)) {
+        console.error('[main] Transcription file does not exist:', transcriptionFile);
+        if (snippetManagerWindow && !snippetManagerWindow.isDestroyed()) {
+          snippetManagerWindow.webContents.send('recording-error', {
+            message: 'Recording file not found for transcription. Check disk space and permissions.'
+          });
+        }
+      } else {
+        transcriptionQueue.enqueue({
+          transcriptId: entry.id,
+          audioFilePath: transcriptionFile,
+          opportunityId: stopResult.opportunityId,
+          options: {}
+        });
+        console.log('[main] Transcription enqueued using:', transcriptionFile);
+      }
     } else {
       console.log('[main] Auto-transcribe disabled — audio saved but not queued');
     }
@@ -1630,6 +1638,29 @@ app.whenReady().then(() => {
       } else {
         audioCapture.deleteTempFile(tmp.tempPath);
       }
+    }
+  }
+
+  // ── Pre-flight dependency checks ──────────────────────────────────────────
+  {
+    // Check ffmpeg
+    const ffmpegCheck = audioCapture._resolveFfmpegPath
+      ? audioCapture._resolveFfmpegPath()
+      : null;
+    if (ffmpegCheck) {
+      console.log('[startup] ffmpeg found:', ffmpegCheck);
+    } else {
+      console.warn('[startup] WARNING: ffmpeg not found. Recording post-processing and transcription will not work.');
+      console.warn('[startup]   Install with:  brew install ffmpeg');
+    }
+
+    // Check @xenova/transformers
+    try {
+      require('@xenova/transformers');
+      console.log('[startup] @xenova/transformers available');
+    } catch (_) {
+      console.warn('[startup] WARNING: @xenova/transformers not found. Transcription will not work.');
+      console.warn('[startup]   Install with:  npm install @xenova/transformers');
     }
   }
 

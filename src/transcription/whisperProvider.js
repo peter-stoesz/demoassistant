@@ -174,6 +174,7 @@ class WhisperProvider extends TranscriptionProvider {
       // Set cache directory if provided
       if (this.modelsDir) {
         env.localModelPath = this.modelsDir;
+        env.cacheDir = this.modelsDir;          // v2.x cache dir
         fs.mkdirSync(this.modelsDir, { recursive: true });
       }
 
@@ -183,7 +184,7 @@ class WhisperProvider extends TranscriptionProvider {
         env.allowLocalModels = true;
       }
 
-      // Create the ASR pipeline
+      // Create the ASR pipeline with download progress forwarding
       if (onProgress) {
         onProgress({
           status: 'initializing',
@@ -192,7 +193,27 @@ class WhisperProvider extends TranscriptionProvider {
         });
       }
 
-      this.pipeline = await pipeline('automatic-speech-recognition', this.modelId);
+      const pipelineOpts = {};
+      if (onProgress) {
+        pipelineOpts.progress_callback = (progressData) => {
+          // @xenova/transformers emits { status, name, file, progress, loaded, total }
+          if (progressData && progressData.status === 'progress') {
+            onProgress({
+              status: 'downloading',
+              progress: Math.round(progressData.progress || 0),
+              file: progressData.file || this.modelId
+            });
+          } else if (progressData && progressData.status === 'done') {
+            onProgress({
+              status: 'loading',
+              progress: 90,
+              file: progressData.file || this.modelId
+            });
+          }
+        };
+      }
+
+      this.pipeline = await pipeline('automatic-speech-recognition', this.modelId, pipelineOpts);
 
       if (onProgress) {
         onProgress({
