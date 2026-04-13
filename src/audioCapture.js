@@ -51,11 +51,9 @@ function init({ userDataPath }) {
 // ─── IPC Handlers (one-time setup) ────────────────────────────────────────────
 
 function setupIpcHandlers() {
-  // Ready signal from capture renderer
-  ipcMain.on('audio-capture-ready', () => {
-    isReady = true;
-    console.log('[audioCapture] Capture window ready');
-  });
+  // NOTE: 'audio-capture-ready' is handled via ipcMain.once() inside
+  // startCapture() to avoid a race condition. Do NOT add a persistent
+  // listener for it here.
 
   // S1-1 / S1-2: Receive streaming audio chunks and append to disk
   ipcMain.on('audio-chunk', (_event, arrayBuffer) => {
@@ -140,29 +138,33 @@ async function startCapture() {
       }
     });
 
-    // Load audioCapture.html
+    // Set up the ready listener BEFORE loading the file to avoid a race
+    // where the renderer fires 'audio-capture-ready' during loadFile()
+    // before the polling promise is created.
+    const readyPromise = new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Capture window ready timeout (15s)'));
+      }, 15000);
+
+      const onReady = () => {
+        isReady = true;
+        clearTimeout(timeout);
+        console.log('[audioCapture] Capture window ready');
+        // Send screen source to renderer
+        captureWindow.webContents.send('audio-capture-start', { sourceId });
+        resolve();
+      };
+
+      // Listen for the ready signal (once — replaces the module-level handler)
+      ipcMain.once('audio-capture-ready', onReady);
+    });
+
+    // Load audioCapture.html — renderer will fire audio-capture-ready when loaded
     const filePath = path.join(__dirname, 'audioCapture.html');
     await captureWindow.loadFile(filePath);
 
-    // Wait for ready signal
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('Capture window ready timeout'));
-      }, 5000);
-
-      const checkReady = () => {
-        if (isReady) {
-          clearTimeout(timeout);
-          clearInterval(checkInterval);
-          // Send screen source to renderer
-          captureWindow.webContents.send('audio-capture-start', { sourceId });
-          resolve();
-        }
-      };
-
-      const checkInterval = setInterval(checkReady, 100);
-      checkReady();
-    });
+    // Now wait for the ready signal (may already have resolved)
+    return readyPromise;
   } catch (err) {
     console.error('[audioCapture] Failed to start capture:', err.message);
     _closeWriteStream();

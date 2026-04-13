@@ -100,7 +100,7 @@
         // ── 5. Combine video + mixed audio into one stream ──────────────
         const combinedTracks = [];
 
-        // Add video track from screen capture
+        // Add video track from screen capture (may be null if permission denied)
         if (videoStream) {
           const videoTracks = videoStream.getVideoTracks();
           videoTracks.forEach(t => combinedTracks.push(t));
@@ -110,19 +110,30 @@
         const audioTracks = destination.stream.getAudioTracks();
         audioTracks.forEach(t => combinedTracks.push(t));
 
+        // Validate: we need at least one track to record
+        if (combinedTracks.length === 0) {
+          window.audioCaptureAPI.sendError('No audio or video tracks available. Check Screen Recording and Microphone permissions.');
+          return;
+        }
+
         mediaStream = new MediaStream(combinedTracks);
 
         // ── 6. Create MediaRecorder ─────────────────────────────────────
+        // Pick MIME types based on which tracks we actually have
+        const hasVideo = combinedTracks.some(t => t.kind === 'video');
         let mimeType = '';
-        const candidates = [
-          'video/webm;codecs=vp9,opus',
-          'video/webm;codecs=vp8,opus',
-          'video/webm;codecs=vp9',
-          'video/webm;codecs=vp8',
-          'video/webm',
-          'audio/webm;codecs=opus',  // fallback if no video tracks
-          'audio/webm'
-        ];
+        const candidates = hasVideo
+          ? [
+              'video/webm;codecs=vp9,opus',
+              'video/webm;codecs=vp8,opus',
+              'video/webm;codecs=vp9',
+              'video/webm;codecs=vp8',
+              'video/webm'
+            ]
+          : [
+              'audio/webm;codecs=opus',
+              'audio/webm'
+            ];
 
         for (const candidate of candidates) {
           if (MediaRecorder.isTypeSupported(candidate)) {
