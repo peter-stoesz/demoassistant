@@ -20,6 +20,22 @@ contextBridge.exposeInMainWorld('audioCaptureAPI', {
   },
 
   /**
+   * onPauseCapture(callback)
+   * Pauses the MediaRecorder
+   */
+  onPauseCapture: (callback) => {
+    ipcRenderer.on('audio-capture-pause', () => callback());
+  },
+
+  /**
+   * onResumeCapture(callback)
+   * Resumes the MediaRecorder after pause
+   */
+  onResumeCapture: (callback) => {
+    ipcRenderer.on('audio-capture-resume', () => callback());
+  },
+
+  /**
    * sendAudioData(arrayBuffer)
    * Sends the recorded audio buffer back to main (legacy fallback)
    */

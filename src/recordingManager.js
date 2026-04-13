@@ -278,7 +278,7 @@ class RecordingManager extends EventEmitter {
       const files = fs.readdirSync(this.recordingsDir);
 
       for (const file of files) {
-        if (!file.endsWith('.webm')) continue;
+        if (!file.endsWith('.webm') && !file.endsWith('.mp4') && !file.endsWith('.wav')) continue;
 
         const filePath = path.join(this.recordingsDir, file);
         try {

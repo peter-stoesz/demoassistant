@@ -529,13 +529,28 @@ async function stopRecordingFlow() {
 
   try {
     const captureResult = await audioCapture.stopCapture();
-    console.log('[main] Audio capture stopped, file:', captureResult.filePath);
+    console.log('[main] Capture stopped, WebM file:', captureResult.filePath);
 
     recordingManager.onRecordingFileSaved(captureResult.filePath);
 
     // Broadcast state change
     broadcastRecordingState();
     rebuildTrayMenu();
+
+    // Post-processing: convert WebM → MP4 (video) + WAV (audio for Whisper)
+    let wavFilePath = null;
+    try {
+      const converted = await audioCapture.convertToOutputFormats(captureResult.filePath);
+      if (converted.mp4Path) {
+        console.log('[main] MP4 output ready:', converted.mp4Path);
+      }
+      if (converted.wavPath) {
+        console.log('[main] WAV output ready:', converted.wavPath);
+        wavFilePath = converted.wavPath;
+      }
+    } catch (convErr) {
+      console.error('[main] Post-processing failed:', convErr.message);
+    }
 
     // Create transcript entry and enqueue transcription if auto-transcribe is on
     const entry = transcriptStore.createTranscriptEntry({
@@ -545,12 +560,16 @@ async function stopRecordingFlow() {
 
     const shouldTranscribe = transcriptionConfig.get('autoTranscribe') !== false;
     if (shouldTranscribe && transcriptionQueue) {
+      // Use the WAV file for transcription (16kHz mono, ideal for Whisper).
+      // Fall back to the raw WebM if WAV conversion failed.
+      const transcriptionFile = wavFilePath || captureResult.filePath;
       transcriptionQueue.enqueue({
         transcriptId: entry.id,
-        audioFilePath: captureResult.filePath,
+        audioFilePath: transcriptionFile,
         opportunityId: stopResult.opportunityId,
         options: {}
       });
+      console.log('[main] Transcription enqueued using:', transcriptionFile);
     } else {
       console.log('[main] Auto-transcribe disabled — audio saved but not queued');
     }
@@ -562,9 +581,13 @@ async function stopRecordingFlow() {
 
     try {
       const { Notification } = require('electron');
+      const parts = [];
+      parts.push(`Recording saved (${stopResult.duration}s)`);
+      if (wavFilePath) parts.push('WAV + MP4 exported');
+      parts.push('Transcription queued');
       const n = new Notification({
         title: 'Demo Assistant — Recording Saved',
-        body: `Recording saved (${stopResult.duration}s). Transcription queued.`,
+        body: parts.join('. ') + '.',
         silent: true
       });
       n.show();
@@ -1261,6 +1284,7 @@ ipcMain.handle('stop-recording', async () => {
 ipcMain.handle('pause-recording', () => {
   try {
     recordingManager.pauseRecording();
+    audioCapture.pauseCapture();
     broadcastRecordingState();
     rebuildTrayMenu();
     return { success: true };
@@ -1272,6 +1296,7 @@ ipcMain.handle('pause-recording', () => {
 ipcMain.handle('resume-recording', () => {
   try {
     recordingManager.resumeRecording();
+    audioCapture.resumeCapture();
     broadcastRecordingState();
     rebuildTrayMenu();
     return { success: true };

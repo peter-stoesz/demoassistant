@@ -16,6 +16,7 @@
 const { BrowserWindow, ipcMain, desktopCapturer } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { execFile } = require('child_process');
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -102,6 +103,7 @@ function setupIpcHandlers() {
  * Returns: Promise that resolves when window is ready
  */
 async function startCapture() {
+  isReady = false;  // Reset for fresh ready-check
   try {
     // Get screen source ID from desktopCapturer
     const sources = await desktopCapturer.getSources({ types: ['screen'] });
@@ -349,6 +351,98 @@ function _finaliseFile() {
   });
 }
 
+// ─── Pause / Resume ──────────────────────────────────────────────────────────
+
+function pauseCapture() {
+  if (captureWindow && !captureWindow.isDestroyed()) {
+    captureWindow.webContents.send('audio-capture-pause');
+    console.log('[audioCapture] Pause signal sent');
+  }
+}
+
+function resumeCapture() {
+  if (captureWindow && !captureWindow.isDestroyed()) {
+    captureWindow.webContents.send('audio-capture-resume');
+    console.log('[audioCapture] Resume signal sent');
+  }
+}
+
+// ─── ffmpeg Post-Processing ──────────────────────────────────────────────────
+
+function _resolveFfmpegPath() {
+  try {
+    const staticPath = require('ffmpeg-static');
+    if (staticPath && fs.existsSync(staticPath)) return staticPath;
+  } catch (_) {}
+  const candidates = [
+    '/opt/homebrew/bin/ffmpeg',
+    '/usr/local/bin/ffmpeg',
+    '/usr/bin/ffmpeg',
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
+
+/**
+ * convertToOutputFormats(webmPath)
+ * Produces an MP4 (screen+audio) and a WAV (16kHz mono for Whisper).
+ * Returns: Promise<{ mp4Path, wavPath }>
+ */
+function convertToOutputFormats(webmPath) {
+  const ffmpeg = _resolveFfmpegPath();
+  if (!ffmpeg) {
+    console.warn('[audioCapture] ffmpeg not found — skipping MP4/WAV conversion');
+    return Promise.resolve({ mp4Path: null, wavPath: null });
+  }
+
+  const basePath = webmPath.replace(/\.webm$/i, '');
+  const mp4Path = basePath + '.mp4';
+  const wavPath = basePath + '.wav';
+
+  return new Promise((resolve) => {
+    // MP4: re-encode video to H.264, audio to AAC
+    const mp4Args = [
+      '-y', '-i', webmPath,
+      '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+      '-c:a', 'aac', '-b:a', '128k',
+      '-movflags', '+faststart',
+      mp4Path
+    ];
+
+    console.log('[audioCapture] Converting to MP4...');
+    execFile(ffmpeg, mp4Args, { timeout: 600000 }, (mp4Err) => {
+      if (mp4Err) {
+        console.error('[audioCapture] MP4 conversion failed:', mp4Err.message);
+      } else {
+        console.log('[audioCapture] MP4 saved:', mp4Path);
+      }
+
+      // WAV: extract audio at 16kHz mono 16-bit PCM for Whisper
+      const wavArgs = [
+        '-y', '-i', webmPath,
+        '-vn', '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le',
+        wavPath
+      ];
+
+      console.log('[audioCapture] Extracting WAV...');
+      execFile(ffmpeg, wavArgs, { timeout: 300000 }, (wavErr) => {
+        if (wavErr) {
+          console.error('[audioCapture] WAV extraction failed:', wavErr.message);
+          resolve({ mp4Path: fs.existsSync(mp4Path) ? mp4Path : null, wavPath: null });
+        } else {
+          console.log('[audioCapture] WAV saved:', wavPath);
+          resolve({
+            mp4Path: fs.existsSync(mp4Path) ? mp4Path : null,
+            wavPath
+          });
+        }
+      });
+    });
+  });
+}
+
 // ─── Exports ──────────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -357,9 +451,12 @@ module.exports = {
   startCapture,
   stopCapture,
   cancelCapture,
+  pauseCapture,
+  resumeCapture,
   setTargetFile,
   isCapturing,
   getRecordingsDir,
+  convertToOutputFormats,
   // S1-4: Crash recovery
   getTempFiles,
   recoverTempFile,

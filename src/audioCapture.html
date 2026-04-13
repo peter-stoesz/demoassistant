@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Audio Capture</title>
+  <title>Audio &amp; Screen Capture</title>
   <style>
     body {
       margin: 0;
@@ -16,21 +16,47 @@
   <script>
     'use strict';
 
+    // Module-level references to prevent garbage collection
+    let audioContext = null;
     let mediaStream = null;
     let mediaRecorder = null;
-    // S1-3: chunks array removed — audio is streamed to disk via IPC
+    let systemStream = null;
+    let micStream = null;
+    let videoStream = null;
 
     /**
-     * Start audio capture from both system audio and microphone.
-     * Chunks are streamed to the main process via IPC as they arrive —
-     * no in-memory array is kept in the renderer.
+     * Start screen + audio capture.
+     *
+     * Captures:
+     *   - Screen video via desktopCapturer source
+     *   - System audio via desktopCapturer source
+     *   - Microphone via getUserMedia
+     *
+     * All tracks are combined into a single MediaRecorder that outputs
+     * video/webm. Chunks are streamed to the main process via IPC as
+     * they arrive — no in-memory array is kept in the renderer.
      */
     async function startCapture(sourceId) {
       try {
-        let systemStream = null;
-        let micStream = null;
+        // ── 1. Get screen video ─────────────────────────────────────────
+        try {
+          videoStream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: {
+              mandatory: {
+                chromeMediaSource: 'desktop',
+                chromeMediaSourceId: sourceId,
+                maxFrameRate: 15
+              }
+            }
+          });
+          console.log('[capture] Screen video captured');
+        } catch (vidErr) {
+          console.warn('[capture] Screen video failed:', vidErr.message);
+          window.audioCaptureAPI.sendError('Screen capture failed: ' + vidErr.message);
+        }
 
-        // Try to get system audio first
+        // ── 2. Get system audio ─────────────────────────────────────────
         try {
           systemStream = await navigator.mediaDevices.getUserMedia({
             audio: {
@@ -38,57 +64,84 @@
                 chromeMediaSource: 'desktop',
                 chromeMediaSourceId: sourceId
               }
-            }
+            },
+            video: false
           });
-          console.log('[audioCapture] System audio captured');
+          console.log('[capture] System audio captured');
         } catch (sysErr) {
-          console.warn('[audioCapture] System audio failed, continuing with mic only:', sysErr.message);
+          console.warn('[capture] System audio failed:', sysErr.message);
         }
 
-        // Try to get microphone
+        // ── 3. Get microphone ───────────────────────────────────────────
         try {
-          micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          console.log('[audioCapture] Microphone captured');
+          micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          console.log('[capture] Microphone captured');
         } catch (micErr) {
-          console.warn('[audioCapture] Microphone failed:', micErr.message);
+          console.warn('[capture] Microphone failed:', micErr.message);
           if (!systemStream) {
-            window.audioCaptureAPI.sendError('Failed to access both system audio and microphone');
+            window.audioCaptureAPI.sendError('No audio sources available');
             return;
           }
         }
 
-        // Mix streams using AudioContext
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        // ── 4. Mix audio streams via AudioContext ───────────────────────
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
         const destination = audioContext.createMediaStreamDestination();
 
         if (systemStream) {
           const systemSource = audioContext.createMediaStreamSource(systemStream);
           systemSource.connect(destination);
         }
-
         if (micStream) {
           const micSource = audioContext.createMediaStreamSource(micStream);
           micSource.connect(destination);
         }
 
-        mediaStream = destination.stream;
+        // ── 5. Combine video + mixed audio into one stream ──────────────
+        const combinedTracks = [];
 
-        // Create MediaRecorder
-        let mimeType = 'audio/webm;codecs=opus';
-        if (!MediaRecorder.isTypeSupported(mimeType)) {
-          mimeType = 'audio/webm';
-        }
-        if (!MediaRecorder.isTypeSupported(mimeType)) {
-          mimeType = '';
+        // Add video track from screen capture
+        if (videoStream) {
+          const videoTracks = videoStream.getVideoTracks();
+          videoTracks.forEach(t => combinedTracks.push(t));
         }
 
-        const options = mimeType ? { mimeType } : {};
-        mediaRecorder = new MediaRecorder(mediaStream, options);
+        // Add mixed audio track
+        const audioTracks = destination.stream.getAudioTracks();
+        audioTracks.forEach(t => combinedTracks.push(t));
+
+        mediaStream = new MediaStream(combinedTracks);
+
+        // ── 6. Create MediaRecorder ─────────────────────────────────────
+        let mimeType = '';
+        const candidates = [
+          'video/webm;codecs=vp9,opus',
+          'video/webm;codecs=vp8,opus',
+          'video/webm;codecs=vp9',
+          'video/webm;codecs=vp8',
+          'video/webm',
+          'audio/webm;codecs=opus',  // fallback if no video tracks
+          'audio/webm'
+        ];
+
+        for (const candidate of candidates) {
+          if (MediaRecorder.isTypeSupported(candidate)) {
+            mimeType = candidate;
+            break;
+          }
+        }
+
+        if (!mimeType) {
+          window.audioCaptureAPI.sendError('No supported recording codec found');
+          return;
+        }
+
+        console.log('[capture] Using MIME type:', mimeType);
+        mediaRecorder = new MediaRecorder(mediaStream, { mimeType });
 
         /**
-         * S1-1: Stream each chunk to main via IPC immediately.
-         * The Blob is converted to an ArrayBuffer and sent; then the
-         * reference is released so renderer memory stays flat.
+         * Stream each chunk to main via IPC immediately.
+         * 1-second chunks keep crash-loss to at most 1 second.
          */
         mediaRecorder.ondataavailable = async (event) => {
           if (event.data.size > 0) {
@@ -96,34 +149,48 @@
               const buffer = await event.data.arrayBuffer();
               window.audioCaptureAPI.sendAudioChunk(buffer);
             } catch (err) {
-              console.error('[audioCapture] Failed to send chunk:', err);
+              console.error('[capture] Failed to send chunk:', err);
             }
-            // Blob is not stored — memory stays flat
           }
         };
 
         mediaRecorder.onerror = (event) => {
-          console.error('[audioCapture] MediaRecorder error:', event.error);
-          window.audioCaptureAPI.sendError(`Recording error: ${event.error}`);
+          console.error('[capture] MediaRecorder error:', event.error);
+          window.audioCaptureAPI.sendError('Recording error: ' + event.error);
         };
 
-        /**
-         * Fire ondataavailable every 1000 ms (1 second) so chunks
-         * are flushed to disk frequently — at most 1 second of audio
-         * is lost on crash.
-         */
+        // Fire ondataavailable every 1000 ms (1 second)
         mediaRecorder.start(1000);
-        console.log('[audioCapture] Recording started (streaming to disk)');
+        console.log('[capture] Recording started (video + audio, streaming to disk)');
       } catch (err) {
-        console.error('[audioCapture] Capture error:', err);
-        window.audioCaptureAPI.sendError(`Capture error: ${err.message}`);
+        console.error('[capture] Capture error:', err);
+        window.audioCaptureAPI.sendError('Capture error: ' + err.message);
       }
     }
 
     /**
-     * Stop audio capture.
-     * After the MediaRecorder fully stops, notify main so it can
-     * close the write stream and finalise the file.
+     * Pause recording — MediaRecorder.pause() stops data flow.
+     */
+    function pauseCapture() {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.pause();
+        console.log('[capture] Recording paused');
+      }
+    }
+
+    /**
+     * Resume recording after pause.
+     */
+    function resumeCapture() {
+      if (mediaRecorder && mediaRecorder.state === 'paused') {
+        mediaRecorder.resume();
+        console.log('[capture] Recording resumed');
+      }
+    }
+
+    /**
+     * Stop capture. After the MediaRecorder fully stops, notify main
+     * so it can close the write stream and finalise the file.
      */
     async function stopCapture() {
       try {
@@ -133,7 +200,7 @@
           // Wait for MediaRecorder to go inactive (final chunk fires first)
           await new Promise((resolve) => {
             const checkInterval = setInterval(() => {
-              if (mediaRecorder.state === 'inactive') {
+              if (!mediaRecorder || mediaRecorder.state === 'inactive') {
                 clearInterval(checkInterval);
                 resolve();
               }
@@ -143,27 +210,51 @@
 
         // Signal main that all chunks have been sent
         window.audioCaptureAPI.sendCaptureStop();
-        console.log('[audioCapture] Stop signal sent to main');
+        console.log('[capture] Stop signal sent to main');
 
-        // Cleanup
+        // Cleanup all streams and context
+        if (videoStream) {
+          videoStream.getTracks().forEach(track => track.stop());
+          videoStream = null;
+        }
+        if (systemStream) {
+          systemStream.getTracks().forEach(track => track.stop());
+          systemStream = null;
+        }
+        if (micStream) {
+          micStream.getTracks().forEach(track => track.stop());
+          micStream = null;
+        }
         if (mediaStream) {
           mediaStream.getTracks().forEach(track => track.stop());
           mediaStream = null;
         }
+        if (audioContext) {
+          try { audioContext.close(); } catch (_) {}
+          audioContext = null;
+        }
         mediaRecorder = null;
       } catch (err) {
-        console.error('[audioCapture] Stop error:', err);
-        window.audioCaptureAPI.sendError(`Stop error: ${err.message}`);
+        console.error('[capture] Stop error:', err);
+        window.audioCaptureAPI.sendError('Stop error: ' + err.message);
       }
     }
 
-    // Listen for IPC messages from main process
+    // ── IPC listeners ───────────────────────────────────────────────────
     window.audioCaptureAPI.onStartCapture(({ sourceId }) => {
       startCapture(sourceId);
     });
 
     window.audioCaptureAPI.onStopCapture(() => {
       stopCapture();
+    });
+
+    window.audioCaptureAPI.onPauseCapture(() => {
+      pauseCapture();
+    });
+
+    window.audioCaptureAPI.onResumeCapture(() => {
+      resumeCapture();
     });
 
     // Signal ready
