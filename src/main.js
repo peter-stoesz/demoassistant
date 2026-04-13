@@ -1607,7 +1607,7 @@ app.on('will-quit', () => {
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 
-app.whenReady().then(async () => {
+app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
 
   // Initialise the application logger
@@ -1684,9 +1684,11 @@ app.whenReady().then(async () => {
       appLogger.warn('startup', 'ffmpeg not found — install with: brew install ffmpeg');
     }
 
-    // Check @xenova/transformers (ESM-only package — must use dynamic import)
+    // Check @xenova/transformers — use require.resolve() to verify the package
+    // exists without actually loading the ESM module or its ONNX native bindings,
+    // which can crash if incompatible. The real import happens in whisperProvider.
     try {
-      await import('@xenova/transformers');
+      require.resolve('@xenova/transformers');
       console.log('[startup] @xenova/transformers available');
       appLogger.info('startup', '@xenova/transformers available');
     } catch (_) {

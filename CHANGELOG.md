@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-04-13 — Fix Startup Crash from @xenova/transformers Pre-flight Import
+
+**Problem:** The app crashed on launch after the previous ESM import fix. The pre-flight check used `await import('@xenova/transformers')`, which fully loaded the ONNX runtime and its native bindings at startup. If the native bindings were incompatible or threw, the error became an unhandled rejection inside the `async` `.then()` callback, crashing the Electron process.
+**Fix:** Replaced `await import()` with `require.resolve()` which only checks that the package exists in `node_modules` without loading it. Reverted `.then(async () => {` back to `.then(() => {`. The actual ESM import still happens lazily in `whisperProvider.js` when transcription is requested — wrapped in proper try/catch.
+
+**Files modified:** `src/main.js`
+
+---
+
 ## 2026-04-13 — Fix Audio Capture Timeout on Stop
 
 **Problem:** Clicking Stop produced `"Audio capture timeout"` after 10 seconds. The renderer's `stopCapture()` wrapped the entire function — including the `sendCaptureStop()` IPC call — in a single try/catch. If anything threw (MediaRecorder shutdown, stream cleanup), the catch block sent `audio-capture-error` but never sent `audio-capture-stopped`. The main process only listened for `audio-capture-stopped`, so it waited the full 10s and timed out.
