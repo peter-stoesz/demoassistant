@@ -71,12 +71,16 @@ demo-assistant/
 │   ├── zoomLens.html            # Magnified view window
 │   ├── zoomLensPreload.js       # Preload for zoom lens
 │   ├── floatingPanel.js         # Floating UI panel component
+│   ├── memoryMonitor.js         # Memory-pressure monitor for long recordings
 │   └── transcription/
 │       ├── provider.js          # Abstract transcription provider base class
 │       ├── queue.js             # FIFO transcription job queue with persistence
-│       └── whisperProvider.js   # Whisper implementation via @xenova/transformers
+│       ├── whisperProvider.js   # Whisper implementation via @xenova/transformers
+│       ├── workerProvider.js    # Child-process wrapper (fork-based, crash-isolated)
+│       └── whisperWorker.js     # Child process entry point (ONNX shim + IPC)
 ├── scripts/
 │   ├── afterPack.js             # Build hook: strips macOS xattrs before codesign
+│   ├── install-onnx-shim.js     # Postinstall: creates onnxruntime-node → web shim
 │   └── generate-icons.py        # Icon generation script (16px-1024px)
 ├── build/
 │   ├── entitlements_mac.plist   # macOS entitlements (screen capture, JIT)
@@ -166,10 +170,50 @@ Stored files include: `snippets.json`, `opportunities.json`, `transcription-conf
 | Package | Purpose |
 |---|---|
 | @xenova/transformers | Local Whisper transcription (ES Module, loaded via dynamic import) |
+| onnxruntime-web | WASM-based ONNX inference runtime (used via shim — see below) |
 | papaparse | CSV parsing for opportunity import |
 | @jitsi/robotjs (optional) | Native keyboard simulation for character-by-character typing |
 | electron | Application framework (v28+) |
 | electron-builder | Packaging and distribution |
+| ffmpeg-static | Audio/video post-processing (WebM → MP4 + WAV) |
+
+## Transcription Architecture
+
+Transcription runs entirely **out-of-process** to protect the Electron main process from native crashes:
+
+1. **WorkerProvider** (`src/transcription/workerProvider.js`) — Drop-in replacement for WhisperProvider. Spawns `whisperWorker.js` as a child process via `child_process.fork()` with `ELECTRON_RUN_AS_NODE=1`.
+2. **whisperWorker.js** (`src/transcription/whisperWorker.js`) — Child process that loads `@xenova/transformers` and runs Whisper inference. Communicates with the parent via Node IPC messages.
+3. **ONNX Runtime Shim** — The native `onnxruntime-node` package crashes with SIGTRAP on macOS (both Electron and forked children). A shim package at `node_modules/@xenova/transformers/node_modules/onnxruntime-node/` intercepts the ESM import and redirects to `onnxruntime-web` (WASM). The shim is recreated automatically by `scripts/install-onnx-shim.js` (runs as a postinstall hook).
+4. **WhisperProvider** (`src/transcription/whisperProvider.js`) — Low-level provider that does the actual `import('@xenova/transformers')` and pipeline creation. Only runs inside the child process. Removes the `'cpu'` execution provider (not supported by onnxruntime-web) and forces WASM-only execution.
+
+If the child process crashes (SIGTRAP, OOM), only the child dies. The main Electron app stays alive and shows an error message. WorkerProvider also auto-retries with a non-quantized (float32) model if the quantized model crashes.
+
+## Recording Architecture
+
+Recording uses a hidden BrowserWindow (`src/audioCapture.html`) to capture screen video + system audio + microphone via the MediaRecorder API. Audio chunks are streamed to disk via IPC every 1 second.
+
+Key implementation details:
+
+- **Stop mechanism**: Uses `webContents.executeJavaScript()` to directly invoke the stop sequence in the renderer. This replaced the original IPC event-based stop which was unreliable for hidden windows.
+- **Post-processing**: After recording stops, ffmpeg converts the WebM to MP4 (H.264/AAC for playback) and WAV (16kHz mono PCM for Whisper transcription).
+- **Resilience**: Even if the renderer is frozen or crashed, the stop flow always finalises whatever data was streamed to disk — recordings are never lost.
+
+## Known Issues and Next Steps
+
+**Status as of 2026-04-13:**
+
+- **ONNX WASM transcription**: The onnxruntime-web WASM backend works but is slower than native. Model download and transcription should function without crashing. If transcription fails with a SIGTRAP, the child process dies gracefully and the error is surfaced to the UI. Try a smaller model (whisper-base.en) if larger models fail.
+- **Screen recording permission**: `systemPreferences.getMediaAccessStatus('screen')` is unreliable in Electron dev mode (`npm start`). The check is advisory-only — the app attempts recording regardless and surfaces real errors from the capture APIs. In production builds, the permission check should work correctly.
+- **Recording stop**: The `executeJavaScript`-based stop mechanism needs validation. If stop still times out, check the Terminal logs for `[audioCapture]` prefixed messages.
+- **Auto-transcribe on stop**: When `autoTranscribe` is enabled (default), recordings are automatically enqueued for transcription after stop. The queue processes jobs when enqueued — it does NOT auto-process stale jobs from previous sessions on startup (by design, to prevent crash loops).
+
+**Pending work:**
+
+- Validate end-to-end recording → stop → transcription flow
+- Test model download via Settings tab
+- Verify post-processing (WebM → MP4/WAV) with ffmpeg
+- Test with different Whisper model sizes
+- Build and test packaged app (`npm run build:mac`)
 
 ## Notes
 
@@ -179,3 +223,4 @@ Stored files include: `snippets.json`, `opportunities.json`, `transcription-conf
 - macOS Screen Recording permission is required for Freeze Frame and full audio capture. The app detects permission status and falls back to mic-only recording when denied.
 - Whisper models are downloaded on demand from Hugging Face and cached locally in the models directory.
 - Hotkey health is monitored every 60 seconds and shortcuts are automatically re-registered after sleep/wake or display changes.
+- **Do NOT push to GitHub** until explicitly asked — all changes are local to `Demo_Assistant_Source_New`.

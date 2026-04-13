@@ -53,6 +53,15 @@ contextBridge.exposeInMainWorld('audioCaptureAPI', {
   },
 
   /**
+   * sendRecordingStarted()
+   * Tells main that MediaRecorder.start() has succeeded and chunks will flow.
+   * This is the signal main waits for before considering capture fully started.
+   */
+  sendRecordingStarted: () => {
+    ipcRenderer.send('audio-capture-recording');
+  },
+
+  /**
    * sendCaptureStop()
    * Tells main that the MediaRecorder has fully stopped and all chunks have been sent.
    */

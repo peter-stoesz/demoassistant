@@ -17,85 +17,129 @@
 const { execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const ffmpegHelper = require('../ffmpegHelper');
 
 // ─── Defaults ───────────────────────────────────────────────────────────────
 
 const DEFAULT_CHUNK_MINUTES = 5;
 const OVERLAP_SECONDS = 3;  // overlap at chunk boundaries for better accuracy
 
-// ─── ffmpeg path resolution ─────────────────────────────────────────────────
+// ─── ffmpeg path resolution (delegates to shared helper) ────────────────────
 
-/**
- * Resolve the ffmpeg binary path.
- * Checks, in order:
- *   1. Bundled ffmpeg-static (npm dependency)
- *   2. Homebrew on Apple Silicon (/opt/homebrew/bin/ffmpeg)
- *   3. Homebrew on Intel Mac (/usr/local/bin/ffmpeg)
- *   4. Linux system path (/usr/bin/ffmpeg)
- *   5. Bare 'ffmpeg' (hope it's on PATH)
- */
 function getFfmpegPath() {
-  // 1. Bundled
-  try {
-    const staticPath = require('ffmpeg-static');
-    if (staticPath && fs.existsSync(staticPath)) return staticPath;
-  } catch (_) {}
-
-  // 2–4. Common system install locations
-  const candidates = [
-    '/opt/homebrew/bin/ffmpeg',
-    '/usr/local/bin/ffmpeg',
-    '/usr/bin/ffmpeg',
-  ];
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
-  }
-
-  // 5. Last resort — bare name, relies on PATH
-  return 'ffmpeg';
+  return ffmpegHelper.getFfmpegPath();
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 /**
- * Get the total duration of an audio file in seconds using ffprobe.
+ * Get the total duration of an audio file in seconds.
+ *
+ * Tries three methods in order:
+ *   1. ffprobe (fastest, most reliable for files with duration headers)
+ *   2. ffmpeg -i (parse Duration from stderr — works for most container formats)
+ *   3. Decode to WAV (last resort — works for headerless WebM from MediaRecorder)
+ *
+ * Pre-validates the input file before attempting anything.
+ *
  * @param {string} filePath - Path to audio file
  * @returns {Promise<number>} Duration in seconds
  */
 function getDuration(filePath) {
   return new Promise((resolve, reject) => {
-    const ffprobe = getFfmpegPath().replace(/ffmpeg(\.exe)?$/, 'ffprobe$1');
-    // Fall back to ffprobe on PATH if the replacement didn't produce a valid path
-    const probeBin = fs.existsSync(ffprobe) ? ffprobe : 'ffprobe';
+    // ── Pre-flight: validate the input file ───────────────────────────────
+    const fileCheck = ffmpegHelper.validateMediaFile(filePath, { minBytes: 44 });
+    if (!fileCheck.valid) {
+      reject(new Error(
+        `Cannot determine duration: input file invalid — ${fileCheck.error}\n` +
+        `  Path: ${filePath}\n` +
+        `  Size: ${fileCheck.size} bytes\n` +
+        `  This usually means the recording was empty or truncated.\n` +
+        `  Check that stopCapture() properly flushed all audio data to disk.`
+      ));
+      return;
+    }
+    console.log(`[audioSplitter] Input file: ${(fileCheck.size / 1024).toFixed(1)} KB, format: ${fileCheck.format || 'unknown'}`);
+
+    // ── Method 1: ffprobe ─────────────────────────────────────────────────
+    const probeBin = ffmpegHelper.getFfprobePath();
 
     execFile(probeBin, [
       '-v', 'error',
       '-show_entries', 'format=duration',
       '-of', 'default=noprint_wrappers=1:nokey=1',
       filePath
-    ], (err, stdout) => {
-      if (err) {
-        // If ffprobe fails, try ffmpeg -i as fallback
-        execFile(getFfmpegPath(), ['-i', filePath], (err2, _stdout2, stderr2) => {
-          const match = stderr2 && stderr2.match(/Duration:\s*(\d+):(\d+):(\d+)\.(\d+)/);
-          if (match) {
-            const hours = parseInt(match[1], 10);
-            const mins  = parseInt(match[2], 10);
-            const secs  = parseInt(match[3], 10);
-            const frac  = parseInt(match[4], 10) / 100;
-            resolve(hours * 3600 + mins * 60 + secs + frac);
-          } else {
-            reject(new Error(`Cannot determine duration of ${filePath}`));
+    ], { timeout: 30000 }, (err, stdout) => {
+      if (!err) {
+        const dur = parseFloat(stdout.trim());
+        if (!isNaN(dur) && dur > 0) {
+          console.log(`[audioSplitter] Duration via ffprobe: ${dur.toFixed(1)}s`);
+          resolve(dur);
+          return;
+        }
+      }
+
+      // ── Method 2: ffmpeg -i (parse Duration from stderr) ──────────────
+      console.log('[audioSplitter] ffprobe failed or returned no duration, trying ffmpeg -i...');
+      execFile(getFfmpegPath(), ['-i', filePath], { timeout: 30000 }, (err2, _stdout2, stderr2) => {
+        const match = stderr2 && stderr2.match(/Duration:\s*(\d+):(\d+):(\d+)\.(\d+)/);
+        if (match) {
+          const hours = parseInt(match[1], 10);
+          const mins  = parseInt(match[2], 10);
+          const secs  = parseInt(match[3], 10);
+          const frac  = parseInt(match[4], 10) / 100;
+          const dur = hours * 3600 + mins * 60 + secs + frac;
+          console.log(`[audioSplitter] Duration via ffmpeg -i: ${dur.toFixed(1)}s`);
+          resolve(dur);
+          return;
+        }
+
+        // ── Method 3: Decode to WAV and compute from file size ──────────
+        // WebM files from MediaRecorder often have no duration header.
+        // ffmpeg can still decode them. We convert to a known format (WAV)
+        // and calculate duration from the output byte count.
+        console.log('[audioSplitter] No duration header — decoding to measure length...');
+        console.log(`[audioSplitter] ffmpeg -i stderr: ${stderr2 ? stderr2.slice(0, 300) : '(none)'}`);
+
+        const tmpWav = filePath + '.dur_probe.wav';
+        const wavResult = ffmpegHelper.convertToWav(filePath, tmpWav, { timeout: 120000 });
+
+        wavResult.then((result) => {
+          if (!result.success) {
+            try { fs.unlinkSync(tmpWav); } catch (_) {}
+            reject(new Error(
+              `Cannot determine duration of ${filePath}: all methods failed.\n` +
+              `  File size: ${fileCheck.size} bytes, format: ${fileCheck.format || 'unknown'}\n` +
+              `  ffprobe: failed\n` +
+              `  ffmpeg -i: no Duration header\n` +
+              `  WAV decode: ${result.error}\n` +
+              `  The recording file may be corrupted or empty.`
+            ));
+            return;
           }
+
+          try {
+            const stat = fs.statSync(tmpWav);
+            // WAV header is 44 bytes; 16kHz mono 16-bit PCM = 32000 bytes/sec
+            const dataBytes = stat.size - 44;
+            const dur = dataBytes / 32000;
+            console.log(`[audioSplitter] Duration via WAV decode: ${dur.toFixed(1)}s (${(stat.size / (1024*1024)).toFixed(1)} MB WAV)`);
+            try { fs.unlinkSync(tmpWav); } catch (_) {}
+
+            if (dur <= 0) {
+              reject(new Error(`Duration computed as ${dur}s — recording appears empty`));
+              return;
+            }
+            resolve(dur);
+          } catch (statErr) {
+            try { fs.unlinkSync(tmpWav); } catch (_) {}
+            reject(new Error(`Cannot stat decoded WAV: ${statErr.message}`));
+          }
+        }).catch((promiseErr) => {
+          try { fs.unlinkSync(tmpWav); } catch (_) {}
+          reject(new Error(`WAV decode promise failed: ${promiseErr.message}`));
         });
-        return;
-      }
-      const dur = parseFloat(stdout.trim());
-      if (isNaN(dur)) {
-        reject(new Error(`Invalid duration output for ${filePath}: "${stdout}"`));
-      } else {
-        resolve(dur);
-      }
+      });
     });
   });
 }

@@ -177,6 +177,46 @@ class WorkerProvider extends TranscriptionProvider {
     return new Promise((resolve, reject) => {
       let settled = false;
 
+      // Setup timeout: 5 minutes. Covers model download + WASM compilation.
+      // Progress resets the timer so active downloads don't time out.
+      const SETUP_TIMEOUT_MS = 5 * 60 * 1000;
+      let setupTimer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          this._ready = false;
+          console.error('[WorkerProvider] Setup timed out after 5 minutes');
+          this._killChild();
+          reject(new Error(
+            'Transcription engine setup timed out (5 minutes). ' +
+            'The model may be too large for the WASM backend. ' +
+            'Try a smaller model (e.g., Xenova/whisper-base.en) in Settings.'
+          ));
+        }
+      }, SETUP_TIMEOUT_MS);
+
+      // Reset timeout on progress — active downloads/loading shouldn't time out
+      const resetSetupTimer = () => {
+        if (setupTimer) {
+          clearTimeout(setupTimer);
+          setupTimer = setTimeout(() => {
+            if (!settled) {
+              settled = true;
+              this._ready = false;
+              console.error('[WorkerProvider] Setup timed out (no progress for 5 minutes)');
+              this._killChild();
+              reject(new Error(
+                'Transcription engine setup stalled (no progress for 5 minutes). ' +
+                'Try a smaller model (e.g., Xenova/whisper-base.en) in Settings.'
+              ));
+            }
+          }, SETUP_TIMEOUT_MS);
+        }
+      };
+
+      const settle = () => {
+        if (setupTimer) { clearTimeout(setupTimer); setupTimer = null; }
+      };
+
       // Fork a new child process running whisperWorker.js.
       // ELECTRON_RUN_AS_NODE=1 is critical — without it, fork() creates
       // another Electron app instance (which exits immediately with code 0
@@ -203,6 +243,7 @@ class WorkerProvider extends TranscriptionProvider {
       const onMessage = (msg) => {
         switch (msg.type) {
           case 'setup-progress':
+            resetSetupTimer();
             if (onProgress) onProgress(msg.data);
             break;
 
@@ -211,6 +252,7 @@ class WorkerProvider extends TranscriptionProvider {
             child.removeListener('message', onMessage);
             if (!settled) {
               settled = true;
+              settle();
               console.log(`[WorkerProvider] Setup complete (quantized=${quantized})`);
               resolve();
             }
@@ -221,6 +263,7 @@ class WorkerProvider extends TranscriptionProvider {
             child.removeListener('message', onMessage);
             if (!settled) {
               settled = true;
+              settle();
               this._killChild();
               reject(new Error(msg.error));
             }
@@ -229,6 +272,7 @@ class WorkerProvider extends TranscriptionProvider {
           case 'fatal-error':
             if (!settled) {
               settled = true;
+              settle();
               this._ready = false;
               reject(new Error(`Transcription engine fatal error: ${msg.error}`));
             }
@@ -243,6 +287,7 @@ class WorkerProvider extends TranscriptionProvider {
         this._child = null;
         if (!settled) {
           settled = true;
+          settle();
           reject(new Error(`Failed to start transcription process: ${err.message}`));
         }
       });
@@ -254,6 +299,7 @@ class WorkerProvider extends TranscriptionProvider {
 
         if (!settled) {
           settled = true;
+          settle();
           const sigInfo = signal ? ` (signal: ${signal})` : '';
           const rosettaHint = this._archInfo.rosetta
             ? ' This may be caused by running the x86_64 build on Apple Silicon via Rosetta. ' +
@@ -334,11 +380,52 @@ class WorkerProvider extends TranscriptionProvider {
       const onChunk = options.onChunk || null;
       let settled = false;
 
+      // Transcription timeout: 10 minutes per attempt.
+      // Chunk progress resets the timer so long files don't time out
+      // as long as they're making forward progress.
+      const TRANSCRIBE_TIMEOUT_MS = 10 * 60 * 1000;
+      let transcribeTimer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          console.error('[WorkerProvider] Transcription timed out after 10 minutes');
+          this._child.removeListener('message', messageHandler);
+          this._killChild();
+          reject(new Error(
+            'Transcription timed out (10 minutes with no progress). ' +
+            'The model may be too large for the WASM backend. ' +
+            'Try a smaller model (e.g., Xenova/whisper-base.en) in Settings.'
+          ));
+        }
+      }, TRANSCRIBE_TIMEOUT_MS);
+
+      const resetTranscribeTimer = () => {
+        if (transcribeTimer) {
+          clearTimeout(transcribeTimer);
+          transcribeTimer = setTimeout(() => {
+            if (!settled) {
+              settled = true;
+              console.error('[WorkerProvider] Transcription stalled (no progress for 10 minutes)');
+              this._child.removeListener('message', messageHandler);
+              this._killChild();
+              reject(new Error(
+                'Transcription stalled (no progress for 10 minutes). ' +
+                'Try a smaller model (e.g., Xenova/whisper-base.en) in Settings.'
+              ));
+            }
+          }, TRANSCRIBE_TIMEOUT_MS);
+        }
+      };
+
+      const clearTimer = () => {
+        if (transcribeTimer) { clearTimeout(transcribeTimer); transcribeTimer = null; }
+      };
+
       const messageHandler = (msg) => {
         if (msg.jobId && msg.jobId !== jobId) return;
 
         switch (msg.type) {
           case 'transcribe-chunk':
+            resetTranscribeTimer();
             if (onChunk) {
               onChunk(msg.segments, msg.fullText, msg.chunkIndex);
             }
@@ -346,12 +433,14 @@ class WorkerProvider extends TranscriptionProvider {
 
           case 'transcribe-done':
             settled = true;
+            clearTimer();
             this._child.removeListener('message', messageHandler);
             resolve(msg.result);
             break;
 
           case 'transcribe-error':
             settled = true;
+            clearTimer();
             this._child.removeListener('message', messageHandler);
             reject(new Error(msg.error));
             break;
@@ -359,6 +448,7 @@ class WorkerProvider extends TranscriptionProvider {
           case 'fatal-error':
             if (!settled) {
               settled = true;
+              clearTimer();
               this._child.removeListener('message', messageHandler);
               reject(new Error(`Transcription engine crashed: ${msg.error}`));
             }
@@ -370,6 +460,7 @@ class WorkerProvider extends TranscriptionProvider {
       const exitHandler = (code, signal) => {
         if (!settled) {
           settled = true;
+          clearTimer();
           this._child = null;
           this._ready = false;
 

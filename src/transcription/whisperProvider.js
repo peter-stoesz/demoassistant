@@ -20,36 +20,12 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const TranscriptionProvider = require('./provider');
+const ffmpegHelper = require('../ffmpegHelper');
 
-// ─── ffmpeg resolution ──────────────────────────────────────────────────────
+// ─── ffmpeg resolution (delegates to shared helper) ─────────────────────────
 
-/**
- * Resolve an ffmpeg binary that actually exists on disk.
- * Checks, in order:
- *   1. The bundled ffmpeg-static binary (npm dependency)
- *   2. Homebrew on Apple Silicon (/opt/homebrew/bin/ffmpeg)
- *   3. Homebrew on Intel Mac (/usr/local/bin/ffmpeg)
- *   4. Linux system path (/usr/bin/ffmpeg)
- * Returns the absolute path to the first one found, or null.
- */
 function _resolveFfmpegPath() {
-  // 1. Bundled ffmpeg-static
-  try {
-    const staticPath = require('ffmpeg-static');
-    if (staticPath && fs.existsSync(staticPath)) return staticPath;
-  } catch (_) {}
-
-  // 2–4. Common system install locations
-  const candidates = [
-    '/opt/homebrew/bin/ffmpeg',   // Homebrew on Apple Silicon
-    '/usr/local/bin/ffmpeg',      // Homebrew on Intel Mac
-    '/usr/bin/ffmpeg',            // Linux / apt
-  ];
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
-  }
-
-  return null;
+  return ffmpegHelper.getFfmpegPath();
 }
 
 /**
@@ -112,6 +88,76 @@ function _convertToWav(inputPath) {
   }
 }
 
+/**
+ * Decode a 16-bit PCM WAV buffer into a Float32Array of normalised samples.
+ *
+ * WAV files have a RIFF header followed by one or more chunks. The audio
+ * samples live inside the "data" chunk.  We search for it rather than
+ * assuming a fixed 44-byte header, because some encoders insert extra
+ * chunks (e.g. LIST/INFO metadata) between "fmt " and "data".
+ *
+ * The samples are converted from signed 16-bit integers (range -32768..32767)
+ * to floating point (range -1.0..1.0), which is what Whisper expects.
+ */
+function _decodeWavToFloat32(wavBuffer) {
+  // Validate minimum WAV size (RIFF header = 12 bytes + fmt chunk ≥ 24 + data header ≥ 8)
+  if (wavBuffer.length < 44) {
+    throw new Error('WAV buffer too small (' + wavBuffer.length + ' bytes)');
+  }
+
+  // Verify RIFF/WAVE magic
+  const riff = wavBuffer.toString('ascii', 0, 4);
+  const wave = wavBuffer.toString('ascii', 8, 12);
+  if (riff !== 'RIFF' || wave !== 'WAVE') {
+    throw new Error('Not a valid WAV file (magic: ' + riff + '/' + wave + ')');
+  }
+
+  // Find the "data" chunk by scanning sub-chunks after the 12-byte RIFF header
+  let offset = 12;
+  let dataOffset = -1;
+  let dataSize = 0;
+
+  while (offset + 8 <= wavBuffer.length) {
+    const chunkId = wavBuffer.toString('ascii', offset, offset + 4);
+    const chunkSize = wavBuffer.readUInt32LE(offset + 4);
+
+    if (chunkId === 'data') {
+      dataOffset = offset + 8;
+      dataSize = chunkSize;
+      break;
+    }
+
+    // Move to next chunk (8-byte header + chunk payload, padded to even)
+    offset += 8 + chunkSize;
+    if (chunkSize % 2 !== 0) offset += 1; // RIFF chunks are word-aligned
+  }
+
+  if (dataOffset === -1) {
+    throw new Error('WAV "data" chunk not found');
+  }
+
+  // Clamp dataSize to what's actually available in the buffer
+  const availableBytes = wavBuffer.length - dataOffset;
+  if (dataSize > availableBytes) {
+    console.warn('[WhisperProvider] WAV data chunk claims ' + dataSize +
+      ' bytes but only ' + availableBytes + ' available — clamping');
+    dataSize = availableBytes;
+  }
+
+  // 16-bit samples = 2 bytes each
+  const numSamples = Math.floor(dataSize / 2);
+  const float32 = new Float32Array(numSamples);
+
+  for (let i = 0; i < numSamples; i++) {
+    // readInt16LE gives signed 16-bit value (-32768..32767)
+    const sample = wavBuffer.readInt16LE(dataOffset + i * 2);
+    // Normalise to -1.0..1.0
+    float32[i] = sample / 32768.0;
+  }
+
+  return float32;
+}
+
 // ─── WhisperProvider ─────────────────────────────────────────────────────────
 
 /**
@@ -166,15 +212,58 @@ class WhisperProvider extends TranscriptionProvider {
    */
   async setup(onProgress) {
     try {
+      console.log('[WhisperProvider] setup() starting — modelId:', this.modelId);
+
       // Import transformers library (ESM-only package — must use dynamic import)
+      console.log('[WhisperProvider] Importing @xenova/transformers...');
       this.transformers = await import('@xenova/transformers');
       const { pipeline, env } = this.transformers;
+      console.log('[WhisperProvider] @xenova/transformers imported successfully');
+
+      // Force WASM-only execution.  The onnxruntime-node → onnxruntime-web shim
+      // prevents the native ONNX addon from loading, but onnx.js still adds 'cpu'
+      // to executionProviders when it detects Node.js.  onnxruntime-web doesn't
+      // have a 'cpu' provider, so we must remove it to avoid runtime errors.
+      try {
+        const onnxBackend = await import('@xenova/transformers/src/backends/onnx.js');
+        if (onnxBackend && onnxBackend.executionProviders) {
+          const idx = onnxBackend.executionProviders.indexOf('cpu');
+          if (idx !== -1) {
+            onnxBackend.executionProviders.splice(idx, 1);
+          }
+          console.log('[WhisperProvider] Execution providers:', JSON.stringify(onnxBackend.executionProviders));
+        }
+
+        // Configure ONNX WASM environment for Node.js child process.
+        // onnxruntime-web needs explicit settings when running outside a browser:
+        //   - numThreads=1: avoid Web Worker threading issues in Node.js
+        //   - wasmPaths: point to the actual .wasm files on disk
+        if (onnxBackend.ONNX && onnxBackend.ONNX.env && onnxBackend.ONNX.env.wasm) {
+          onnxBackend.ONNX.env.wasm.numThreads = 1;
+          console.log('[WhisperProvider] Set WASM numThreads=1');
+
+          // Resolve the path to onnxruntime-web's dist directory where .wasm files live
+          try {
+            const ortWebPkg = require.resolve('onnxruntime-web');
+            const ortWebDir = path.dirname(ortWebPkg) + '/';
+            onnxBackend.ONNX.env.wasm.wasmPaths = ortWebDir;
+            console.log('[WhisperProvider] Set WASM paths:', ortWebDir);
+          } catch (pathErr) {
+            console.warn('[WhisperProvider] Could not resolve onnxruntime-web path:', pathErr.message);
+          }
+        } else {
+          console.warn('[WhisperProvider] ONNX.env.wasm not found — WASM config skipped');
+        }
+      } catch (onnxErr) {
+        console.warn('[WhisperProvider] Could not configure ONNX backend:', onnxErr.message);
+      }
 
       // Set cache directory if provided
       if (this.modelsDir) {
         env.localModelPath = this.modelsDir;
         env.cacheDir = this.modelsDir;          // v2.x cache dir
         fs.mkdirSync(this.modelsDir, { recursive: true });
+        console.log('[WhisperProvider] Models dir:', this.modelsDir);
       }
 
       // Set up progress callback
@@ -192,6 +281,8 @@ class WhisperProvider extends TranscriptionProvider {
         });
       }
 
+      console.log('[WhisperProvider] Creating pipeline for:', this.modelId);
+
       const pipelineOpts = {};
       if (onProgress) {
         pipelineOpts.progress_callback = (progressData) => {
@@ -203,16 +294,20 @@ class WhisperProvider extends TranscriptionProvider {
               file: progressData.file || this.modelId
             });
           } else if (progressData && progressData.status === 'done') {
+            console.log('[WhisperProvider] Model file loaded:', progressData.file);
             onProgress({
               status: 'loading',
               progress: 90,
               file: progressData.file || this.modelId
             });
+          } else if (progressData) {
+            console.log('[WhisperProvider] Pipeline progress:', progressData.status, progressData.file || '');
           }
         };
       }
 
       this.pipeline = await pipeline('automatic-speech-recognition', this.modelId, pipelineOpts);
+      console.log('[WhisperProvider] Pipeline created successfully');
 
       if (onProgress) {
         onProgress({
@@ -245,6 +340,7 @@ class WhisperProvider extends TranscriptionProvider {
    * @returns {Promise<Object>} { segments, fullText, language }
    */
   async transcribe(audioFilePath, options = {}) {
+    console.log('[WhisperProvider] transcribe() called for:', audioFilePath);
     if (!this.pipeline) {
       throw new Error('Pipeline not initialized. Call setup() first.');
     }
@@ -252,6 +348,9 @@ class WhisperProvider extends TranscriptionProvider {
     if (!fs.existsSync(audioFilePath)) {
       throw new Error(`Audio file not found: ${audioFilePath}`);
     }
+
+    const fileSize = fs.statSync(audioFilePath).size;
+    console.log('[WhisperProvider] Audio file size:', (fileSize / (1024 * 1024)).toFixed(1), 'MB');
 
     // ── Pre-convert non-WAV to WAV so transformers doesn't need ffmpeg ────
     let fileToRead = audioFilePath;
@@ -270,10 +369,25 @@ class WhisperProvider extends TranscriptionProvider {
     }
 
     try {
-      const audioBuffer = fs.readFileSync(fileToRead);
+      // ── Decode WAV PCM into Float32Array ──────────────────────────────
+      // @xenova/transformers WhisperFeatureExtractor expects Float32Array of
+      // normalised PCM samples (range -1.0 to 1.0), NOT a Node.js Buffer.
+      // Since we pre-convert to 16 kHz mono 16-bit PCM WAV above, we can
+      // parse the WAV header to find the data chunk and convert directly.
+      const rawBuf = fs.readFileSync(fileToRead);
+      let audioData;
+
+      if (_isWavFile(fileToRead)) {
+        audioData = _decodeWavToFloat32(rawBuf);
+        console.log('[WhisperProvider] Decoded WAV to Float32Array:', audioData.length, 'samples');
+      } else {
+        // Non-WAV fallback — pass raw buffer and hope transformers can handle it
+        console.warn('[WhisperProvider] Non-WAV input — passing raw buffer (may fail)');
+        audioData = rawBuf;
+      }
 
       // Call the pipeline with transcription options
-      const result = await this.pipeline(audioBuffer, {
+      const result = await this.pipeline(audioData, {
         chunk_length_s: 30,
         stride_length_s: 5,
         return_timestamps: true,

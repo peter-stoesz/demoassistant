@@ -27,59 +27,75 @@
     /**
      * Start screen + audio capture.
      *
-     * Captures:
-     *   - Screen video via desktopCapturer source
-     *   - System audio via desktopCapturer source
-     *   - Microphone via getUserMedia
+     * Supports two modes:
+     *   - 'full': Screen video + system audio + mic (uses chromeMediaSource: 'desktop')
+     *   - 'audio-only': Mic only (no desktop capture — avoids renderer crash when
+     *     screen recording permission is denied)
      *
-     * All tracks are combined into a single MediaRecorder that outputs
-     * video/webm. Chunks are streamed to the main process via IPC as
-     * they arrive — no in-memory array is kept in the renderer.
+     * In 'full' mode, if getUserMedia for desktop capture triggers Chromium's
+     * "bad IPC message" kill, the main process detects the renderer crash and
+     * retries in 'audio-only' mode automatically.
+     *
+     * Chunks are streamed to the main process via IPC as they arrive.
      */
-    async function startCapture(sourceId) {
+    async function startCapture(sourceId, mode) {
+      mode = mode || 'full';
+      console.log('[capture] Starting capture in "' + mode + '" mode, sourceId:', sourceId);
+
       try {
-        // ── 1. Get screen video ─────────────────────────────────────────
-        try {
-          videoStream = await navigator.mediaDevices.getUserMedia({
-            audio: false,
-            video: {
-              mandatory: {
-                chromeMediaSource: 'desktop',
-                chromeMediaSourceId: sourceId,
-                maxFrameRate: 15
+        // ── 1. Get screen video (full mode only) ────────────────────────
+        if (mode === 'full' && sourceId) {
+          try {
+            videoStream = await navigator.mediaDevices.getUserMedia({
+              audio: false,
+              video: {
+                mandatory: {
+                  chromeMediaSource: 'desktop',
+                  chromeMediaSourceId: sourceId,
+                  maxFrameRate: 15
+                }
               }
-            }
-          });
-          console.log('[capture] Screen video captured');
-        } catch (vidErr) {
-          console.warn('[capture] Screen video failed:', vidErr.message);
-          window.audioCaptureAPI.sendError('Screen capture failed: ' + vidErr.message);
+            });
+            console.log('[capture] Screen video captured');
+          } catch (vidErr) {
+            console.warn('[capture] Screen video failed:', vidErr.message);
+            // NOTE: On macOS without screen recording permission, this error can
+            // trigger Chromium to kill the renderer ("bad IPC message, reason 263").
+            // If that happens, the main process will retry in audio-only mode.
+            window.audioCaptureAPI.sendError('Screen capture failed: ' + vidErr.message);
+          }
+        } else {
+          console.log('[capture] Skipping screen video (audio-only mode)');
         }
 
-        // ── 2. Get system audio ─────────────────────────────────────────
-        try {
-          systemStream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-              mandatory: {
-                chromeMediaSource: 'desktop',
-                chromeMediaSourceId: sourceId
-              }
-            },
-            video: false
-          });
-          console.log('[capture] System audio captured');
-        } catch (sysErr) {
-          console.warn('[capture] System audio failed:', sysErr.message);
+        // ── 2. Get system audio (full mode only) ────────────────────────
+        if (mode === 'full' && sourceId) {
+          try {
+            systemStream = await navigator.mediaDevices.getUserMedia({
+              audio: {
+                mandatory: {
+                  chromeMediaSource: 'desktop',
+                  chromeMediaSourceId: sourceId
+                }
+              },
+              video: false
+            });
+            console.log('[capture] System audio captured');
+          } catch (sysErr) {
+            console.warn('[capture] System audio failed:', sysErr.message);
+          }
+        } else {
+          console.log('[capture] Skipping system audio (audio-only mode)');
         }
 
-        // ── 3. Get microphone ───────────────────────────────────────────
+        // ── 3. Get microphone (both modes) ──────────────────────────────
         try {
           micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
           console.log('[capture] Microphone captured');
         } catch (micErr) {
           console.warn('[capture] Microphone failed:', micErr.message);
           if (!systemStream) {
-            window.audioCaptureAPI.sendError('No audio sources available');
+            window.audioCaptureAPI.sendError('No audio sources available. Check Microphone permissions in System Settings.');
             return;
           }
         }
@@ -100,26 +116,22 @@
         // ── 5. Combine video + mixed audio into one stream ──────────────
         const combinedTracks = [];
 
-        // Add video track from screen capture (may be null if permission denied)
         if (videoStream) {
           const videoTracks = videoStream.getVideoTracks();
           videoTracks.forEach(t => combinedTracks.push(t));
         }
 
-        // Add mixed audio track
         const audioTracks = destination.stream.getAudioTracks();
         audioTracks.forEach(t => combinedTracks.push(t));
 
-        // Validate: we need at least one track to record
         if (combinedTracks.length === 0) {
-          window.audioCaptureAPI.sendError('No audio or video tracks available. Check Screen Recording and Microphone permissions.');
+          window.audioCaptureAPI.sendError('No audio or video tracks available. Check Microphone permissions in System Settings.');
           return;
         }
 
         mediaStream = new MediaStream(combinedTracks);
 
         // ── 6. Create MediaRecorder ─────────────────────────────────────
-        // Pick MIME types based on which tracks we actually have
         const hasVideo = combinedTracks.some(t => t.kind === 'video');
         let mimeType = '';
         const candidates = hasVideo
@@ -147,21 +159,33 @@
           return;
         }
 
-        console.log('[capture] Using MIME type:', mimeType);
+        console.log('[capture] Mode: ' + mode);
+        console.log('[capture] Tracks: ' + combinedTracks.map(t => t.kind + ':' + t.label).join(', '));
+        console.log('[capture] MIME type: ' + mimeType);
+
         mediaRecorder = new MediaRecorder(mediaStream, { mimeType });
 
         /**
          * Stream each chunk to main via IPC immediately.
          * 1-second chunks keep crash-loss to at most 1 second.
          */
+        let rendererChunkCount = 0;
         mediaRecorder.ondataavailable = async (event) => {
+          rendererChunkCount++;
           if (event.data.size > 0) {
             try {
               const buffer = await event.data.arrayBuffer();
+              if (rendererChunkCount === 1) {
+                console.log('[capture] First chunk: ' + buffer.byteLength + ' bytes');
+              } else if (rendererChunkCount % 10 === 0) {
+                console.log('[capture] Chunk #' + rendererChunkCount + ': ' + buffer.byteLength + ' bytes');
+              }
               window.audioCaptureAPI.sendAudioChunk(buffer);
             } catch (err) {
               console.error('[capture] Failed to send chunk:', err);
             }
+          } else {
+            console.warn('[capture] ondataavailable fired with 0-byte data (chunk #' + rendererChunkCount + ')');
           }
         };
 
@@ -170,9 +194,25 @@
           window.audioCaptureAPI.sendError('Recording error: ' + event.error);
         };
 
-        // Fire ondataavailable every 1000 ms (1 second)
         mediaRecorder.start(1000);
-        console.log('[capture] Recording started (video + audio, streaming to disk)');
+        console.log('[capture] Recording started (' + mode + ' mode, streaming to disk)');
+        console.log('[capture] MediaRecorder state:', mediaRecorder.state);
+
+        // Signal main process that recording is actively running.
+        // This is distinct from 'audio-capture-ready' (which just means HTML loaded).
+        // Main waits for this signal before considering capture successfully started.
+        window.audioCaptureAPI.sendRecordingStarted();
+
+        // Monitor: verify data is flowing after 3 seconds
+        setTimeout(() => {
+          if (mediaRecorder && mediaRecorder.state === 'recording') {
+            console.log('[capture] MediaRecorder still recording after 3s — chunks sent: ' + rendererChunkCount);
+          } else if (mediaRecorder) {
+            console.warn('[capture] MediaRecorder state after 3s: ' + mediaRecorder.state + ' — expected "recording"');
+          } else {
+            console.error('[capture] MediaRecorder is null after 3s — something destroyed it');
+          }
+        }, 3000);
       } catch (err) {
         console.error('[capture] Capture error:', err);
         window.audioCaptureAPI.sendError('Capture error: ' + err.message);
@@ -267,8 +307,8 @@
     }
 
     // ── IPC listeners ───────────────────────────────────────────────────
-    window.audioCaptureAPI.onStartCapture(({ sourceId }) => {
-      startCapture(sourceId);
+    window.audioCaptureAPI.onStartCapture(({ sourceId, mode }) => {
+      startCapture(sourceId, mode);
     });
 
     window.audioCaptureAPI.onStopCapture(() => {

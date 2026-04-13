@@ -7,7 +7,7 @@ const recordingManager  = require('./recordingManager');
 const audioCapture      = require('./audioCapture');
 const transcriptStore   = require('./transcriptStore');
 const TranscriptionQueue = require('./transcription/queue');
-const WhisperProvider      = require('./transcription/whisperProvider');
+const WorkerProvider       = require('./transcription/workerProvider');
 const transcriptionConfig  = require('./transcriptionConfig');
 const memoryMonitor        = require('./memoryMonitor');
 const appLogger            = require('./appLogger');
@@ -464,32 +464,21 @@ async function startRecordingWithOpportunity(opportunityId) {
     }
   } catch (_) { /* non-fatal */ }
 
-  // macOS: check screen recording permission before attempting capture
+  // macOS: log screen recording permission status (informational only).
+  // NOTE: systemPreferences.getMediaAccessStatus('screen') is unreliable in
+  // Electron — it often returns 'denied' even when the user has granted the
+  // permission, particularly when running in dev mode (npm start) where the
+  // process identity is "Electron" rather than the signed app bundle.
+  // We log the status for diagnostics but do NOT block recording based on it.
+  // The actual capture APIs (desktopCapturer.getSources, getUserMedia) will
+  // properly fail with a meaningful error if permission is truly missing.
   if (process.platform === 'darwin') {
     try {
       const { systemPreferences } = require('electron');
       const screenAccess = systemPreferences.getMediaAccessStatus('screen');
-      console.log('[main] Screen recording permission:', screenAccess);
+      console.log('[main] Screen recording permission (advisory):', screenAccess);
       if (screenAccess !== 'granted') {
-        const { Notification: N, shell } = require('electron');
-        const n = new N({
-          title: 'Demo Assistant — Screen Permission Required',
-          body: 'Please grant Screen Recording permission in System Settings → Privacy & Security → Screen Recording, then restart the app.',
-          silent: false
-        });
-        n.on('click', () => {
-          shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
-        });
-        n.show();
-        // Also send error to snippet manager
-        if (snippetManagerWindow && !snippetManagerWindow.isDestroyed()) {
-          snippetManagerWindow.webContents.send('recording-error', {
-            message: 'Screen Recording permission not granted. Open System Settings → Privacy & Security → Screen Recording.'
-          });
-        }
-        recordingManager.cancelRecording();
-        broadcastRecordingState();
-        return;
+        console.warn('[main] Screen permission check returned "' + screenAccess + '" — proceeding anyway (check is unreliable in Electron dev mode)');
       }
     } catch (permErr) {
       console.warn('[main] Could not check screen permission:', permErr.message);
@@ -616,17 +605,38 @@ async function stopRecordingFlow() {
 
     const shouldTranscribe = transcriptionConfig.get('autoTranscribe') !== false;
     if (shouldTranscribe && transcriptionQueue) {
-      // Check if the audio file actually exists before enqueuing
+      // Validate the audio file before enqueuing for transcription.
+      // Prefer WAV (already converted) over raw WebM to avoid downstream
+      // duration-detection and format-conversion failures in the transcription pipeline.
       const transcriptionFile = wavFilePath || captureResult.filePath;
-      if (!fs.existsSync(transcriptionFile)) {
-        console.error('[main] Transcription file does not exist:', transcriptionFile);
-        appLogger.error('transcription', 'Audio file missing for transcription', { path: transcriptionFile });
+      const ffmpegHelper = require('./ffmpegHelper');
+      const fileCheck = ffmpegHelper.validateMediaFile(transcriptionFile, { minBytes: 100 });
+
+      if (!fileCheck.valid) {
+        console.error(`[main] Transcription file invalid: ${fileCheck.error}`);
+        console.error(`[main] File: ${transcriptionFile}, size: ${fileCheck.size}`);
+        appLogger.error('transcription', 'Audio file invalid for transcription', {
+          path: transcriptionFile,
+          error: fileCheck.error,
+          size: fileCheck.size
+        });
         if (snippetManagerWindow && !snippetManagerWindow.isDestroyed()) {
           snippetManagerWindow.webContents.send('recording-error', {
-            message: 'Recording file not found for transcription. Check disk space and permissions.'
+            message: `Recording file invalid for transcription: ${fileCheck.error}. Check disk space and permissions.`
           });
         }
       } else {
+        console.log(`[main] Transcription file validated: ${transcriptionFile} (${(fileCheck.size / 1024).toFixed(1)} KB, format: ${fileCheck.format || 'unknown'})`);
+
+        // Warn if we're falling back to WebM (means WAV conversion failed)
+        if (!wavFilePath) {
+          console.warn('[main] WARNING: Using raw WebM for transcription — WAV conversion failed. This may cause issues.');
+          appLogger.warn('transcription', 'Falling back to WebM for transcription', {
+            path: transcriptionFile,
+            size: fileCheck.size
+          });
+        }
+
         transcriptionQueue.enqueue({
           transcriptId: entry.id,
           audioFilePath: transcriptionFile,
@@ -1400,7 +1410,10 @@ ipcMain.handle('download-model', async (_event, modelId) => {
   try {
     const resolvedId = modelId || transcriptionConfig.get('modelId') || 'Xenova/whisper-base.en';
     appLogger.info('transcription', 'Model download started', { modelId: resolvedId });
-    const provider = new WhisperProvider({
+    // Use WorkerProvider so @xenova/transformers + ONNX Runtime load in a
+    // child process.  If the native ONNX bindings crash (SIGTRAP), only the
+    // child dies — the main Electron process stays alive.
+    const provider = new WorkerProvider({
       modelId: resolvedId,
       modelsDir: path.join(userDataPath, 'models')
     });
@@ -1411,6 +1424,9 @@ ipcMain.handle('download-model', async (_event, modelId) => {
         snippetManagerWindow.webContents.send('model-download-progress', progress);
       }
     });
+
+    // Dispose the child process after download — the queue has its own provider
+    await provider.dispose();
 
     appLogger.success('transcription', 'Model download complete', { modelId: resolvedId });
     return { success: true };
@@ -1703,13 +1719,16 @@ app.whenReady().then(() => {
   // Initialise transcript store and transcription queue (Sprint 3)
   transcriptStore.init(userDataPath);
 
-  const whisperProvider = new WhisperProvider({
+  // Use WorkerProvider so transcription runs in a child process.
+  // This prevents ONNX Runtime native crashes (SIGTRAP) from killing the
+  // Electron main process.
+  const workerProvider = new WorkerProvider({
     modelId: transcriptionConfig.get('modelId') || 'Xenova/whisper-base.en',
     modelsDir: path.join(userDataPath, 'models')
   });
 
   transcriptionQueue = new TranscriptionQueue({
-    provider: whisperProvider,
+    provider: workerProvider,
     transcriptStore,
     userDataPath
   });

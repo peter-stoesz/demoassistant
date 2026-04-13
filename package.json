@@ -10,7 +10,8 @@
     "build": "electron-builder --mac --win",
     "build:mac": "electron-builder --mac",
     "build:win": "electron-builder --win",
-    "pack": "electron-builder --dir"
+    "pack": "electron-builder --dir",
+    "postinstall": "node scripts/install-onnx-shim.js"
   },
   "keywords": [
     "presentation",
