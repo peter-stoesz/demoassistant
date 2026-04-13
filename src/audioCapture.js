@@ -195,6 +195,7 @@ async function stopCapture() {
         captureWindow.destroy();
         captureWindow = null;
       }
+      isReady = false;
       reject(new Error('Audio capture timeout'));
     }, 10000);
 
@@ -206,14 +207,17 @@ async function stopCapture() {
       // Close the write stream and rename temp → final
       _finaliseFile()
         .then(() => {
+          resolve({ filePath: targetFilePath, duration: 0 });
+        })
+        .catch(reject)
+        .finally(() => {
+          // Always clean up the capture window, whether finalise succeeded or failed
           if (captureWindow) {
             captureWindow.destroy();
             captureWindow = null;
-            isReady = false;
           }
-          resolve({ filePath: targetFilePath, duration: 0 });
-        })
-        .catch(reject);
+          isReady = false;
+        });
     };
 
     ipcMain.once('audio-capture-stopped', stoppedHandler);

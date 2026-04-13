@@ -659,9 +659,20 @@ async function stopRecordingFlow() {
     } catch (_) {}
   } catch (err) {
     console.error('[main] Failed to stop recording:', err.message);
-    recordingManager.onProcessingComplete();
+    appLogger.error('recording', 'Stop recording failed', { error: err.message });
+
+    // cancelRecording() handles STOPPING state (onProcessingComplete only
+    // works from PROCESSING, which we never reached if stopCapture failed)
+    recordingManager.cancelRecording();
     broadcastRecordingState();
     rebuildTrayMenu();
+
+    // Surface the error to the user
+    if (snippetManagerWindow && !snippetManagerWindow.isDestroyed()) {
+      snippetManagerWindow.webContents.send('recording-error', {
+        message: 'Recording failed to stop properly: ' + err.message
+      });
+    }
   }
 }
 

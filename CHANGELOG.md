@@ -4,6 +4,23 @@
 
 ---
 
+## 2026-04-13 — Fix Recording Stop Failure and State Machine Deadlock
+
+**Problem:** Clicking "Stop" would fail silently, leaving the state machine stuck at `STOPPING`. Because `onProcessingComplete()` only transitions from `PROCESSING` → `IDLE`, and a failed `stopCapture()` never reaches `PROCESSING`, the state was permanently stuck — blocking all future recordings.
+**Root causes:**
+1. `main.js` `stopRecordingFlow()` catch block called `recordingManager.onProcessingComplete()` which requires `PROCESSING` state — but a failed stop is still in `STOPPING` state. Replaced with `recordingManager.cancelRecording()` which handles `STOPPING` properly.
+2. `audioCapture.js` `stopCapture()` only cleaned up `captureWindow` on the success path of `_finaliseFile()`. If finalisation failed, the destroyed window reference was never nulled — causing `isCapturing()` to return stale results.
+3. The timeout handler in `stopCapture()` did not reset `isReady = false`.
+4. No error was surfaced to the user — failures were only logged to console.
+
+**Changes:**
+- `src/main.js`: Changed catch block to use `cancelRecording()` instead of `onProcessingComplete()`, added `recording-error` IPC message to surface errors as a toast
+- `src/audioCapture.js`: Moved `captureWindow` cleanup into `.finally()` so it runs on both success and failure; added `isReady = false` to the timeout handler
+
+**Files modified:** `src/main.js`, `src/audioCapture.js`
+
+---
+
 ## 2026-04-13 — Fix @xenova/transformers ESM Import Error
 
 **Problem:** Both model download and transcription failed with "Transcription engine not found" because the code used `require('@xenova/transformers')` but the package declares `"type": "module"` in its package.json, making it ESM-only. Node's `require()` cannot load ESM packages and throws MODULE_NOT_FOUND or ERR_REQUIRE_ESM.
