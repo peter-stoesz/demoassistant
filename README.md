@@ -100,6 +100,8 @@ npm start
 
 ## Building Installers
 
+**Before making any code changes, review [CHANGELOG.md](CHANGELOG.md).** It documents every change with the problem it solved, the files it touched, and why. This prevents regressions and duplicate work.
+
 ```bash
 # Build both macOS and Windows
 npm run build
@@ -114,7 +116,7 @@ npm run build:win
 npm run pack
 ```
 
-Output goes to `dist/`.
+Output goes to `dist/`. After making source changes, always rebuild before testing — source edits do not affect the built app in `dist/`.
 
 ## Hotkeys
 
