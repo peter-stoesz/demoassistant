@@ -92,6 +92,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onRecordingStateChange: (callback) => {
     ipcRenderer.on('recording-state-changed', (_event, data) => callback(data));
   },
+  onRecordingError: (callback) => {
+    ipcRenderer.on('recording-error', (_event, data) => callback(data));
+  },
 
   // ── Transcripts (Sprint 3 + Sprint 4) ──────────────────────────────────────
   getTranscripts:            () => ipcRenderer.invoke('get-transcripts'),

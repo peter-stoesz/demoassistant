@@ -19,8 +19,8 @@
     }
 
     #modal {
-      width: 400px;
-      height: 300px;
+      width: 480px;
+      height: 320px;
       background: #1a1d23;
       border: 1px solid #383d4a;
       border-radius: 8px;
@@ -169,6 +169,16 @@
       outline: none;
     }
 
+    #quickStartBtn {
+      background: #34c759;
+      color: #000;
+      font-weight: 700;
+    }
+
+    #quickStartBtn:hover {
+      background: #40d865;
+    }
+
     #startBtn {
       background: #4a9eff;
       color: #000;
@@ -219,7 +229,8 @@
       </div>
     </div>
     <div id="footer">
-      <button id="startBtn" disabled>Start Recording</button>
+      <button id="quickStartBtn">Quick Record</button>
+      <button id="startBtn" disabled>Start with Opportunity</button>
       <button id="cancelBtn">Cancel</button>
     </div>
   </div>
@@ -305,7 +316,13 @@
       startBtn.disabled = false;
     }
 
-    // Start button
+    // Quick Record — start without an opportunity
+    const quickStartBtn = document.getElementById('quickStartBtn');
+    quickStartBtn.addEventListener('click', () => {
+      window.recordingModalAPI.sendSelection('__quick__');
+    });
+
+    // Start button — with selected opportunity
     startBtn.addEventListener('click', () => {
       if (selectedOpportunityId) {
         window.recordingModalAPI.sendSelection(selectedOpportunityId);

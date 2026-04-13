@@ -1205,6 +1205,14 @@ if (window.electronAPI && window.electronAPI.onRecordingStateChange) {
   });
 }
 
+// Listen for recording errors from main process
+if (window.electronAPI && window.electronAPI.onRecordingError) {
+  window.electronAPI.onRecordingError((data) => {
+    console.error('[recordings] Error from main:', data.message);
+    showToast(data.message, 'error');
+  });
+}
+
 // Load initial recording state
 async function loadRecordingState() {
   try {

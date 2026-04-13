@@ -404,8 +404,8 @@ function showRecordingModal() {
   }
 
   recordingModalWindow = new BrowserWindow({
-    width: 420,
-    height: 320,
+    width: 500,
+    height: 340,
     resizable: false,
     frame: false,
     transparent: true,
@@ -440,6 +440,9 @@ function closeRecordingModal() {
 async function startRecordingWithOpportunity(opportunityId) {
   closeRecordingModal();
 
+  // Normalise quick-record sentinel to null
+  if (opportunityId === '__quick__') opportunityId = null;
+
   // Sprint 6 — disk space check before recording
   try {
     const { execSync } = require('child_process');
@@ -460,6 +463,38 @@ async function startRecordingWithOpportunity(opportunityId) {
       }
     }
   } catch (_) { /* non-fatal */ }
+
+  // macOS: check screen recording permission before attempting capture
+  if (process.platform === 'darwin') {
+    try {
+      const { systemPreferences } = require('electron');
+      const screenAccess = systemPreferences.getMediaAccessStatus('screen');
+      console.log('[main] Screen recording permission:', screenAccess);
+      if (screenAccess !== 'granted') {
+        const { Notification: N, shell } = require('electron');
+        const n = new N({
+          title: 'Demo Assistant — Screen Permission Required',
+          body: 'Please grant Screen Recording permission in System Settings → Privacy & Security → Screen Recording, then restart the app.',
+          silent: false
+        });
+        n.on('click', () => {
+          shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+        });
+        n.show();
+        // Also send error to snippet manager
+        if (snippetManagerWindow && !snippetManagerWindow.isDestroyed()) {
+          snippetManagerWindow.webContents.send('recording-error', {
+            message: 'Screen Recording permission not granted. Open System Settings → Privacy & Security → Screen Recording.'
+          });
+        }
+        recordingManager.cancelRecording();
+        broadcastRecordingState();
+        return;
+      }
+    } catch (permErr) {
+      console.warn('[main] Could not check screen permission:', permErr.message);
+    }
+  }
 
   const result = recordingManager.confirmAndRecord(opportunityId);
   if (!result) return;
@@ -501,6 +536,14 @@ async function startRecordingWithOpportunity(opportunityId) {
   } catch (err) {
     console.error('[main] Failed to start audio capture:', err.message);
     recordingManager.cancelRecording();
+    broadcastRecordingState();
+
+    // Send error to snippet manager UI
+    if (snippetManagerWindow && !snippetManagerWindow.isDestroyed()) {
+      snippetManagerWindow.webContents.send('recording-error', {
+        message: `Failed to start recording: ${err.message}`
+      });
+    }
 
     try {
       const { Notification } = require('electron');
