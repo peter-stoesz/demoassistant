@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-04-13 — Fix SIGTRAP Crash on Startup from ONNX Runtime
+
+**Problem:** The app crashed immediately on launch with `SIGTRAP` (native assertion failure). The ONNX native bindings loaded by `@xenova/transformers` are incompatible with the current Electron version. A stale transcription job persisted in `transcription-queue.json` from a previous crash triggered the queue to auto-process on startup, which called `whisperProvider.setup()` → `import('@xenova/transformers')` → ONNX load → SIGTRAP crash.
+**Fix:** Removed automatic queue processing on startup in `queue.js init()`. Persisted jobs are preserved but only processed when new jobs are enqueued during the session or the user manually retries. This prevents ONNX from loading during startup.
+**Recovery:** Users who have a stale queue file need to delete it:
+  `rm ~/Library/Application\ Support/demo-assistant/transcription-queue.json`
+
+**Files modified:** `src/transcription/queue.js`
+
+---
+
 ## 2026-04-13 — Fix Startup Crash from @xenova/transformers Pre-flight Import
 
 **Problem:** The app crashed on launch after the previous ESM import fix. The pre-flight check used `await import('@xenova/transformers')`, which fully loaded the ONNX runtime and its native bindings at startup. If the native bindings were incompatible or threw, the error became an unhandled rejection inside the `async` `.then()` callback, crashing the Electron process.

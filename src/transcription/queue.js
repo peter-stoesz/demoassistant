@@ -62,9 +62,15 @@ class TranscriptionQueue extends EventEmitter {
   async init() {
     this._loadQueue();
     fs.mkdirSync(this.transcriptsDir, { recursive: true });
+
+    // Do NOT auto-process persisted jobs on startup.
+    // Loading @xenova/transformers triggers the ONNX native runtime, which
+    // can crash the Electron main process with SIGTRAP if the native bindings
+    // are incompatible. Transcription jobs are only processed when explicitly
+    // enqueued during this session (via enqueue()), or when the user manually
+    // retries from the UI.
     if (this.jobs.length > 0) {
-      console.log(`[TranscriptionQueue] Loaded ${this.jobs.length} pending jobs`);
-      setImmediate(() => this._processNext());
+      console.log(`[TranscriptionQueue] Found ${this.jobs.length} pending job(s) from previous session — will process when triggered, not automatically`);
     }
   }
 
