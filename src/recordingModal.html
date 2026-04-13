@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Recording Modal</title>
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+
+    #modal {
+      width: 400px;
+      height: 300px;
+      background: #1a1d23;
+      border: 1px solid #383d4a;
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      color: #e8eaf0;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+    }
+
+    #header {
+      padding: 16px;
+      border-bottom: 1px solid #383d4a;
+      font-weight: 600;
+      font-size: 14px;
+      -webkit-app-region: drag;
+    }
+
+    #content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      -webkit-app-region: no-drag;
+    }
+
+    #searchContainer {
+      padding: 12px;
+      border-bottom: 1px solid #383d4a;
+    }
+
+    #searchInput {
+      width: 100%;
+      padding: 8px 12px;
+      background: #2a2f3a;
+      border: 1px solid #383d4a;
+      border-radius: 4px;
+      color: #e8eaf0;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    #searchInput:focus {
+      border-color: #4a9eff;
+    }
+
+    #searchInput::placeholder {
+      color: #888;
+    }
+
+    #dropdownResults {
+      position: absolute;
+      top: 72px;
+      left: 0;
+      right: 0;
+      max-height: 160px;
+      overflow-y: auto;
+      background: #2a2f3a;
+      border-bottom: 1px solid #383d4a;
+      display: none;
+      z-index: 10;
+      margin: 0 12px;
+      border-radius: 4px;
+      border: 1px solid #383d4a;
+    }
+
+    #dropdownResults.show {
+      display: block;
+    }
+
+    .result-item {
+      padding: 8px 12px;
+      cursor: pointer;
+      transition: background 0.15s;
+      border-bottom: 1px solid #383d4a;
+      font-size: 13px;
+    }
+
+    .result-item:last-child {
+      border-bottom: none;
+    }
+
+    .result-item:hover {
+      background: #353b48;
+    }
+
+    .result-oppNum {
+      font-family: 'Courier New', monospace;
+      color: #4a9eff;
+      font-weight: 600;
+      margin-right: 8px;
+    }
+
+    .result-account {
+      color: #c8c8d0;
+    }
+
+    #selectionArea {
+      padding: 12px;
+      border-bottom: 1px solid #383d4a;
+      display: none;
+      background: rgba(74, 158, 255, 0.08);
+    }
+
+    #selectionArea.show {
+      display: block;
+    }
+
+    #selectedInfo {
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    #selectedOppNum {
+      font-family: 'Courier New', monospace;
+      color: #4a9eff;
+      font-weight: 600;
+    }
+
+    #selectedAccount {
+      color: #c8c8d0;
+    }
+
+    #selectedContact {
+      color: #888;
+      font-size: 12px;
+      margin-top: 4px;
+    }
+
+    #footer {
+      display: flex;
+      gap: 8px;
+      padding: 12px;
+      border-top: 1px solid #383d4a;
+    }
+
+    button {
+      flex: 1;
+      padding: 8px 12px;
+      border: none;
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      outline: none;
+    }
+
+    #startBtn {
+      background: #4a9eff;
+      color: #000;
+      font-weight: 700;
+    }
+
+    #startBtn:hover:not(:disabled) {
+      background: #5aafff;
+    }
+
+    #startBtn:disabled {
+      background: #444;
+      color: #666;
+      cursor: default;
+      opacity: 0.5;
+    }
+
+    #cancelBtn {
+      background: #383d4a;
+      color: #c8c8d0;
+    }
+
+    #cancelBtn:hover {
+      background: #454b58;
+    }
+  </style>
+</head>
+<body>
+  <div id="modal">
+    <div id="header">Start Recording</div>
+    <div id="content">
+      <div id="searchContainer">
+        <input
+          id="searchInput"
+          type="text"
+          placeholder="Search opportunities..."
+        />
+      </div>
+      <div id="dropdownResults"></div>
+      <div id="selectionArea">
+        <div id="selectedInfo">
+          <div>
+            <span id="selectedOppNum"></span>
+            <span id="selectedAccount"></span>
+          </div>
+          <div id="selectedContact"></div>
+        </div>
+      </div>
+    </div>
+    <div id="footer">
+      <button id="startBtn" disabled>Start Recording</button>
+      <button id="cancelBtn">Cancel</button>
+    </div>
+  </div>
+
+  <script>
+    'use strict';
+
+    const searchInput = document.getElementById('searchInput');
+    const dropdownResults = document.getElementById('dropdownResults');
+    const selectionArea = document.getElementById('selectionArea');
+    const startBtn = document.getElementById('startBtn');
+    const cancelBtn = document.getElementById('cancelBtn');
+
+    const selectedOppNum = document.getElementById('selectedOppNum');
+    const selectedAccount = document.getElementById('selectedAccount');
+    const selectedContact = document.getElementById('selectedContact');
+
+    let opportunities = [];
+    let selectedOpportunityId = null;
+
+    // Load opportunities on init
+    window.recordingModalAPI.getOpportunities().then((opps) => {
+      opportunities = opps || [];
+    });
+
+    // Search input handler
+    searchInput.addEventListener('input', (e) => {
+      const query = e.target.value.trim().toLowerCase();
+
+      if (!query) {
+        dropdownResults.classList.remove('show');
+        return;
+      }
+
+      const filtered = opportunities.filter((opp) => {
+        const haystack = [
+          opp.opportunityNumber,
+          opp.accountName,
+          opp.contactName
+        ].join(' ').toLowerCase();
+        return haystack.includes(query);
+      });
+
+      // Limit to 8 items
+      const items = filtered.slice(0, 8);
+
+      if (items.length === 0) {
+        dropdownResults.classList.remove('show');
+        return;
+      }
+
+      dropdownResults.innerHTML = items.map((opp) => `
+        <div class="result-item" data-id="${opp.id}">
+          <span class="result-oppNum">${opp.opportunityNumber}</span>
+          <span class="result-account">${opp.accountName}</span>
+        </div>
+      `).join('');
+
+      dropdownResults.classList.add('show');
+
+      // Add click handlers
+      document.querySelectorAll('.result-item').forEach((item) => {
+        item.addEventListener('click', () => {
+          const id = item.getAttribute('data-id');
+          selectOpportunity(id);
+        });
+      });
+    });
+
+    function selectOpportunity(id) {
+      const opp = opportunities.find(o => o.id === id);
+      if (!opp) return;
+
+      selectedOpportunityId = id;
+      searchInput.value = '';
+      dropdownResults.classList.remove('show');
+
+      selectedOppNum.textContent = opp.opportunityNumber;
+      selectedAccount.textContent = opp.accountName;
+      selectedContact.textContent = opp.contactName ? `Contact: ${opp.contactName}` : '';
+
+      selectionArea.classList.add('show');
+      startBtn.disabled = false;
+    }
+
+    // Start button
+    startBtn.addEventListener('click', () => {
+      if (selectedOpportunityId) {
+        window.recordingModalAPI.sendSelection(selectedOpportunityId);
+      }
+    });
+
+    // Cancel button
+    cancelBtn.addEventListener('click', () => {
+      window.recordingModalAPI.sendCancel();
+    });
+
+    // Escape key
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        window.recordingModalAPI.sendCancel();
+      }
+    });
+
+    // Listen for confirm requests from main
+    window.recordingModalAPI.onConfirm(() => {
+      // Modal is already open and ready for user input
+    });
+  </script>
+</body>
+</html>

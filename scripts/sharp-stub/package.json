@@ -1,0 +1,14 @@
+{
+  "name": "sharp",
+  "version": "0.0.0-stub",
+  "description": "No-op stub that replaces the real sharp native module in packaged Electron builds. Exports a minimal constructor so @xenova/transformers can import it without crashing, while avoiding any native binary dependencies.",
+  "type": "module",
+  "main": "index.js",
+  "module": "index.js",
+  "exports": {
+    ".": {
+      "import": "./index.js",
+      "require": "./index.cjs"
+    }
+  }
+}

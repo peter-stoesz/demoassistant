@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Zoom Lens</title>
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-app-region: drag;
+    }
+
+    #lensContainer {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 2px solid rgba(255, 255, 255, 0.25);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    }
+
+    #lensCanvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      image-rendering: auto;
+    }
+
+    #magnificationBadge {
+      position: fixed;
+      bottom: 6px;
+      right: 8px;
+      background: rgba(0, 0, 0, 0.55);
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 8px;
+      pointer-events: none;
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+
+    #magnificationBadge.visible {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="lensContainer">
+    <canvas id="lensCanvas"></canvas>
+  </div>
+  <div id="magnificationBadge">2.0x</div>
+
+  <script>
+    'use strict';
+
+    const canvas = document.getElementById('lensCanvas');
+    const ctx    = canvas.getContext('2d');
+    const badge  = document.getElementById('magnificationBadge');
+
+    let currentMag = 2.0;
+    let badgeTimeout = null;
+
+    function resizeCanvas() {
+      canvas.width  = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    // Receive frames from main process
+    window.zoomLensAPI.onFrame(({ imageDataURL }) => {
+      if (!imageDataURL) return;
+
+      const img = new Image();
+      img.onload = () => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      };
+      img.src = imageDataURL;
+    });
+
+    // Receive magnification updates
+    window.zoomLensAPI.onMagnificationChanged(({ magnification }) => {
+      currentMag = magnification;
+      badge.textContent = magnification.toFixed(1) + 'x';
+      badge.classList.add('visible');
+
+      if (badgeTimeout) clearTimeout(badgeTimeout);
+      badgeTimeout = setTimeout(() => {
+        badge.classList.remove('visible');
+      }, 1500);
+    });
+  </script>
+</body>
+</html>

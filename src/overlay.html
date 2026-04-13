@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Demo Assistant Overlay</title>
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+      cursor: default;
+    }
+
+    #overlayCanvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    #statusBadge {
+      position: fixed;
+      top: 12px;
+      right: 16px;
+      background: rgba(0, 0, 0, 0.6);
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 11px;
+      padding: 5px 12px;
+      border-radius: 20px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      z-index: 9999;
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+    }
+
+    #statusBadge.visible {
+      opacity: 1;
+    }
+
+    #statusBadge.frozen-badge {
+      background: rgba(220, 40, 40, 0.75);
+      color: #fff;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      animation: frozen-pulse 1.5s ease-in-out infinite;
+    }
+
+    @keyframes frozen-pulse {
+      0%, 100% { opacity: 0.85; }
+      50% { opacity: 1; }
+    }
+
+    /* Crosshair cursor shown only during selection drag */
+    body.selecting {
+      cursor: crosshair;
+    }
+
+    /* Crosshair cursor for annotation drawing */
+    body.annotating {
+      cursor: crosshair;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="overlayCanvas"></canvas>
+  <div id="statusBadge"></div>
+  <script src="overlay.js"></script>
+</body>
+</html>

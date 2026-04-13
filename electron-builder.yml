@@ -1,0 +1,83 @@
+# electron-builder.yml
+# Produces: macOS .dmg (x64 + arm64) and Windows NSIS .exe (x64 + ia32)
+
+appId: com.demoassistant.app
+productName: Demo Assistant
+copyright: "Copyright © 2024 Demo Assistant"
+
+# ── Source files ──────────────────────────────────────────────────────────────
+files:
+  - src/**/*
+  - assets/**/*
+  - package.json
+
+asar: true
+asarUnpack:
+  - "node_modules/@jitsi/robotjs/**/*"
+  - "node_modules/node-gyp-build/**/*"
+  - "node_modules/node-addon-api/**/*"
+  - "node_modules/ffmpeg-static/**/*"
+
+# ── Extra resources (bundled alongside app) ───────────────────────────────────
+extraResources:
+  - from: assets/
+    to: assets/
+    filter:
+      - "**/*"
+
+# ── afterPack hook (strips xattrs on macOS before codesign) ──────────────────
+afterPack: scripts/afterPack.js
+
+# ── macOS ─────────────────────────────────────────────────────────────────────
+mac:
+  category: public.app-category.productivity
+  icon: assets/icon.icns
+  darkModeSupport: true
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  identity: null
+  entitlements: build/entitlements_mac.plist
+  entitlementsInherit: build/entitlements_mac.plist
+  target:
+    - target: zip
+      arch:
+        - x64
+        - arm64
+
+# ── Windows ───────────────────────────────────────────────────────────────────
+win:
+  icon: assets/icon.ico
+  requestedExecutionLevel: asInvoker
+  target:
+    - target: nsis
+      arch:
+        - x64
+        - ia32
+    - target: portable
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  allowElevation: true
+  installerIcon: assets/icon.ico
+  uninstallerIcon: assets/icon.ico
+  installerHeaderIcon: assets/icon.ico
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Demo Assistant
+  runAfterFinish: true
+  perMachine: false
+  menuCategory: Demo Assistant
+  include: build/installer.nsh
+
+# ── Linux (bonus) ─────────────────────────────────────────────────────────────
+linux:
+  icon: assets/icon.png
+  category: Utility
+  target:
+    - AppImage
+
+# ── Publishing disabled for local builds ──────────────────────────────────────
+publish: null

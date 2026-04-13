@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Demo Assistant</title>
+  <link rel="stylesheet" href="snippetManager.css" />
+</head>
+<body>
+  <div class="app-container">
+
+    <div class="header">
+      <div class="header-left">
+        <img class="app-icon" src="data:image/png;base64,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" alt="Demo Assistant" />
+      </div>
+      <div class="header-actions">
+        <span class="hotkey-status-icon healthy" id="hotkeyStatusIcon" title="All hotkeys active">✓</span>
+        <button class="btn btn-secondary btn-icon" id="btnCustomize" title="Customize hotkeys">⌨</button>
+        <button class="btn btn-secondary btn-icon" id="btnHelp" title="Keyboard shortcuts">?</button>
+      </div>
+    </div>
+
+    <div class="hotkey-panel" id="hotkeyPanel" style="display:none">
+      <div class="hotkey-panel-title">Keyboard Shortcuts</div>
+      <div class="hotkey-grid">
+        <div class="hotkey-item"><kbd id="kbSnippet1">Ctrl+Alt+B</kbd> Snippet 1</div>
+        <div class="hotkey-item"><kbd id="kbSnippet2">Ctrl+Alt+E</kbd> Snippet 2</div>
+        <div class="hotkey-item"><kbd id="kbSnippet3">Ctrl+Alt+F</kbd> Snippet 3</div>
+        <div class="hotkey-item"><kbd id="kbSonar">Ctrl+Shift+X</kbd> Sonar Blip</div>
+        <div class="hotkey-item"><kbd id="kbSelect">Ctrl+Shift+D</kbd> Selection Box</div>
+        <div class="hotkey-item"><kbd id="kbHighlight">Ctrl+Shift+H</kbd> Cursor Highlight</div>
+        <div class="hotkey-item"><kbd id="kbManager">Ctrl+Shift+S</kbd> This Window</div>
+        <div class="hotkey-item"><kbd id="kbSpotlight">Ctrl+Shift+L</kbd> Spotlight</div>
+        <div class="hotkey-item"><kbd id="kbFreeze">Ctrl+Shift+Z</kbd> Freeze Frame</div>
+        <div class="hotkey-item"><kbd id="kbAnnotate">Ctrl+Shift+A</kbd> Annotate</div>
+        <div class="hotkey-item"><kbd id="kbAnnClear">Ctrl+Shift+C</kbd> Clear Annot.</div>
+        <div class="hotkey-item"><kbd id="kbZoomLens">Ctrl+Shift+M</kbd> Zoom Lens</div>
+        <div class="hotkey-item"><kbd id="kbCueCard">Ctrl+Shift+N</kbd> Cue Cards</div>
+        <div class="hotkey-item"><kbd id="kbCueNext">Ctrl+Shift+→</kbd> Next Card</div>
+        <div class="hotkey-item"><kbd id="kbCuePrev">Ctrl+Shift+←</kbd> Prev Card</div>
+        <div class="hotkey-item"><kbd id="kbRecordToggle">Ctrl+Shift+R</kbd> Record Toggle</div>
+      </div>
+    </div>
+
+    <!-- Phase 5b: Hotkey Customization Panel -->
+    <div class="customize-panel" id="customizePanel" style="display:none">
+      <div class="customize-panel-title">Customize Hotkeys</div>
+      <div class="customize-panel-hint">Click the keyboard icon to record a new shortcut. Press Escape to cancel.</div>
+      <div class="customize-grid">
+        <!-- Populated dynamically by snippetManager.js -->
+      </div>
+    </div>
+
+    <!-- Tab bar (Sprint 3) -->
+    <div class="tab-bar">
+      <button class="tab active" id="tabSnippets">Snippets</button>
+      <button class="tab" id="tabCueCards">Cue Cards</button>
+      <button class="tab" id="tabAccounts">Accounts</button>
+      <button class="tab" id="tabTranscripts">Recordings</button>
+      <button class="tab" id="tabTranscription">Transcription</button>
+      <button class="tab" id="tabSettings">Settings</button>
+      <button class="tab" id="tabLogs">Logs</button>
+    </div>
+
+    <!-- Snippet Section (existing content) -->
+    <div id="snippetSection">
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <button class="btn btn-primary" id="btnAdd">
+            <span>+</span> Add Snippet
+          </button>
+          <span class="snippet-count" id="snippetCount">0 snippets</span>
+        </div>
+        <button class="btn btn-secondary" id="btnSave">
+          Save Changes
+        </button>
+      </div>
+
+      <div class="snippets-container" id="snippetsList">
+        <div class="empty-state" id="emptyState" style="display:none">
+          <div class="empty-icon">📋</div>
+          <h3>No snippets yet</h3>
+          <p>Click "Add Snippet" to create your first text snippet. You can trigger snippets with <kbd>Ctrl+Shift+1</kbd> through <kbd>Ctrl+Shift+9</kbd>.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cue Card Section (Sprint 3) -->
+    <div id="cueCardSection" style="display:none">
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <button class="btn btn-primary" id="btnAddCueCard">
+            <span>+</span> Add Card
+          </button>
+          <select class="cue-set-select" id="cueSetSelect"></select>
+          <button class="btn btn-secondary btn-sm" id="btnNewSet">New Set</button>
+        </div>
+      </div>
+      <div class="cue-card-list" id="cueCardList"></div>
+    </div>
+
+    <!-- Account Section (Sprint 1) -->
+    <div id="accountSection" style="display:none">
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <button class="btn btn-primary" id="btnAddOpp">
+            <span>+</span> Add Opportunity
+          </button>
+          <button class="btn btn-secondary" id="btnImportCsv">Import CSV</button>
+          <span class="snippet-count" id="oppCount">0 opportunities</span>
+        </div>
+        <input type="text" class="search-input" id="oppSearchInput" placeholder="Search opportunities..." />
+      </div>
+
+      <div class="snippets-container" id="oppList">
+        <div class="empty-state" id="oppEmptyState" style="display:none">
+          <div class="empty-icon">&#x1F4BC;</div>
+          <h3>No opportunities yet</h3>
+          <p>Click "Add Opportunity" to create one, or use "Import CSV" to load from a spreadsheet export.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Transcript Section (Sprint 4) -->
+    <div id="transcriptSection" style="display:none">
+      <!-- Recording Controls Panel -->
+      <div class="recording-controls" id="recordingControls">
+        <div class="recording-controls-left">
+          <div class="recording-indicator" id="recordingIndicator">
+            <span class="recording-dot" id="recordingDot"></span>
+            <span class="recording-status-label" id="recordingStatusLabel">Idle</span>
+            <span class="recording-timer" id="recordingTimer">00:00</span>
+          </div>
+        </div>
+        <div class="recording-controls-right">
+          <button class="btn btn-record-ctrl btn-start" id="btnRecStart" title="Start Recording">&#9210; Start</button>
+          <button class="btn btn-record-ctrl btn-pause" id="btnRecPause" title="Pause Recording" disabled>&#9208; Pause</button>
+          <button class="btn btn-record-ctrl btn-resume" id="btnRecResume" title="Resume Recording" style="display:none">&#9654; Resume</button>
+          <button class="btn btn-record-ctrl btn-stop" id="btnRecStop" title="Stop Recording" disabled>&#9724; Stop</button>
+        </div>
+      </div>
+
+      <!-- Output Folder Selector -->
+      <div class="output-folder-row">
+        <span class="output-folder-label">Transcript output folder:</span>
+        <span class="output-folder-path" id="outputFolderPath" title="Click to change">Not set (internal only)</span>
+        <button class="btn btn-secondary btn-sm" id="btnSelectOutputFolder">Browse...</button>
+        <button class="btn btn-secondary btn-sm" id="btnClearOutputFolder" style="display:none" title="Clear output folder">&times;</button>
+      </div>
+
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <span class="snippet-count" id="transcriptCount">0 recordings</span>
+          <span class="snippet-count" id="transcriptionQueueStatus"></span>
+        </div>
+        <input type="text" class="search-input" id="transcriptSearchInput" placeholder="Search recordings..." />
+      </div>
+
+      <div class="transcript-container" id="transcriptListView">
+        <div class="snippets-container" id="transcriptList">
+          <div class="empty-state" id="transcriptEmptyState" style="display:none">
+            <div class="empty-icon">&#x1F399;</div>
+            <h3>No recordings yet</h3>
+            <p>Record a demo session using the controls above, the record hotkey, or the tray menu.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="transcript-detail-view" id="transcriptDetailView" style="display:none">
+        <div class="transcript-detail-header">
+          <button class="btn btn-secondary btn-sm" id="btnBackToList">&larr; Back</button>
+          <div class="transcript-detail-title" id="transcriptDetailTitle"></div>
+          <div class="transcript-detail-actions">
+            <button class="btn btn-secondary btn-sm" id="btnExportTxt">Export TXT</button>
+            <button class="btn btn-secondary btn-sm" id="btnExportMd">Export MD</button>
+            <button class="btn btn-danger btn-sm" id="btnDeleteTranscript">Delete</button>
+          </div>
+        </div>
+        <div class="transcript-detail-meta" id="transcriptDetailMeta"></div>
+        <div class="transcript-detail-content" id="transcriptDetailContent"></div>
+      </div>
+    </div>
+
+    <!-- Transcription Section -->
+    <div id="transcriptionTabSection" style="display:none">
+
+      <!-- Output Folder Selector -->
+      <div class="txn-output-row">
+        <span class="txn-output-label">Save transcriptions to:</span>
+        <span class="txn-output-path" id="txnOutputPath">Not set (internal only)</span>
+        <button class="btn btn-secondary btn-sm" id="btnTxnSelectFolder">Browse...</button>
+        <button class="btn btn-secondary btn-sm" id="btnTxnClearFolder" style="display:none" title="Clear output folder">&times;</button>
+      </div>
+
+      <!-- Toolbar -->
+      <div class="txn-toolbar">
+        <div class="txn-toolbar-left">
+          <span class="snippet-count" id="txnCount">0 transcriptions</span>
+          <span class="snippet-count" id="txnQueueLabel"></span>
+        </div>
+        <div class="txn-toolbar-right">
+          <input type="text" class="search-input" id="txnSearchInput" placeholder="Search transcriptions..." style="width: 180px;" />
+          <button class="btn btn-secondary btn-sm" id="btnTxnRefresh" title="Refresh list">&#8635;</button>
+        </div>
+      </div>
+
+      <!-- Live Transcription Panel (shown during active transcription) -->
+      <div class="txn-live-panel" id="txnLivePanel" style="display:none">
+        <div class="txn-live-header">
+          <div class="txn-live-title">
+            <span class="txn-live-pulse" id="txnLivePulse"></span>
+            <span id="txnLiveLabel">Transcribing...</span>
+          </div>
+          <div>
+            <button class="btn btn-secondary btn-sm" id="btnTxnLiveClose">Minimize</button>
+          </div>
+        </div>
+        <div class="txn-progress-bar" id="txnProgressBar">
+          <div class="txn-progress-fill" id="txnProgressFill"></div>
+        </div>
+        <div class="txn-live-body" id="txnLiveBody">
+          <div class="txn-live-placeholder">Waiting for transcription to begin...</div>
+        </div>
+      </div>
+
+      <!-- History List (default view) -->
+      <div class="txn-history-list" id="txnHistoryList">
+        <div id="txnListContainer">
+          <div class="empty-state" id="txnEmptyState">
+            <div class="empty-icon">&#128196;</div>
+            <h3>No transcriptions yet</h3>
+            <p>Completed transcriptions will appear here. Record a demo session, then transcribe it from the Recordings tab.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Detail View (shown when a completed transcript is clicked) -->
+      <div class="txn-detail-view" id="txnDetailView" style="display:none">
+        <div class="txn-detail-header">
+          <button class="btn btn-secondary btn-sm" id="btnTxnBack">&larr; Back</button>
+          <div class="txn-detail-title" id="txnDetailTitle"></div>
+          <div class="txn-detail-actions">
+            <button class="btn btn-secondary btn-sm" id="btnTxnCopyAll" title="Copy full text">Copy</button>
+            <button class="btn btn-secondary btn-sm" id="btnTxnExportTxt">Export TXT</button>
+            <button class="btn btn-secondary btn-sm" id="btnTxnExportMd">Export MD</button>
+          </div>
+        </div>
+        <div class="txn-detail-meta" id="txnDetailMeta"></div>
+        <div class="txn-detail-content" id="txnDetailContent"></div>
+      </div>
+    </div>
+
+    <!-- Settings Section (Sprint 6) -->
+    <div id="settingsSection" style="display:none">
+      <div class="snippets-container">
+        <div class="settings-group">
+          <h3 class="settings-heading">Transcription Engine</h3>
+
+          <div class="settings-row">
+            <div class="settings-label">Whisper Model</div>
+            <select class="settings-select" id="settingModelId">
+              <optgroup label="English Only (faster, smaller)">
+                <option value="Xenova/whisper-tiny.en">Tiny EN (~75 MB) — fastest</option>
+                <option value="Xenova/whisper-base.en">Base EN (~150 MB) — default</option>
+                <option value="Xenova/whisper-small.en">Small EN (~500 MB) — better accuracy</option>
+              </optgroup>
+              <optgroup label="Multilingual">
+                <option value="Xenova/whisper-tiny">Tiny Multilingual (~75 MB)</option>
+                <option value="Xenova/whisper-base">Base Multilingual (~150 MB)</option>
+                <option value="Xenova/whisper-small">Small Multilingual (~500 MB)</option>
+                <option value="Xenova/whisper-medium">Medium Multilingual (~1.5 GB) — high accuracy</option>
+                <option value="Xenova/whisper-large-v3">Large v3 (~3 GB) — best accuracy</option>
+              </optgroup>
+            </select>
+          </div>
+
+          <!-- Rosetta / architecture warning banner (hidden by default) -->
+          <div id="rosettaWarning" style="display:none; background:#3a2a00; border:1px solid #b8860b; border-radius:6px; padding:10px 12px; margin-bottom:8px; font-size:12px; color:#ffd966; line-height:1.4;">
+            <strong style="color:#ffcc00;">&#9888; Architecture Mismatch</strong><br/>
+            <span id="rosettaWarningText">You are running the Intel build on Apple Silicon via Rosetta. Transcription may be unstable with larger models. Download the Apple Silicon (arm64) build for best performance.</span>
+          </div>
+
+          <div class="settings-row" style="flex-direction:column; align-items:stretch; gap:8px;">
+            <div style="display:flex; align-items:center; justify-content:space-between;">
+              <div class="settings-label" style="margin:0;">Engine Status</div>
+              <span class="settings-value" id="modelStatusLabel">Checking...</span>
+            </div>
+            <div id="modelDownloadArea">
+              <div style="display:flex; gap:8px; align-items:center;">
+                <button class="btn btn-primary btn-sm" id="btnDownloadModel">Download Selected Model</button>
+                <button class="btn btn-secondary btn-sm" id="btnCancelDownload" style="display:none">Cancel</button>
+                <a id="modelHubLink" href="#" target="_blank" style="font-size:11px; color:var(--accent); text-decoration:none;">View on Hugging Face</a>
+              </div>
+              <div class="model-progress-row" id="modelProgressRow" style="display:none; margin-top:8px;">
+                <div class="model-progress-bar">
+                  <div class="model-progress-fill" id="modelProgressFill"></div>
+                </div>
+                <span class="model-progress-text" id="modelProgressText">0%</span>
+              </div>
+              <div class="model-progress-detail" id="modelProgressDetail" style="display:none; font-size:10px; color:var(--text-muted); margin-top:4px;"></div>
+            </div>
+          </div>
+
+          <div class="settings-row">
+            <div class="settings-label">Auto-transcribe after recording</div>
+            <label class="settings-toggle">
+              <input type="checkbox" id="settingAutoTranscribe" checked />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <h3 class="settings-heading">Storage</h3>
+
+          <div class="settings-row">
+            <div class="settings-label">Disk usage</div>
+            <span class="settings-value" id="settingStorageUsage">Calculating...</span>
+          </div>
+
+          <div class="settings-row">
+            <div class="settings-label">Clean up recordings older than</div>
+            <div class="settings-inline">
+              <input type="number" class="settings-number" id="settingCleanupDays" value="90" min="1" max="999" />
+              <span>days</span>
+              <button class="btn btn-secondary btn-sm" id="btnRunCleanup">Clean Up Now</button>
+            </div>
+          </div>
+
+          <div class="settings-row">
+            <div class="settings-label">Max recording duration</div>
+            <div class="settings-inline">
+              <input type="number" class="settings-number" id="settingMaxRecordingMins" value="240" min="5" max="720" />
+              <span>minutes</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Logs Section -->
+    <div id="logsSection" style="display:none">
+      <div class="logs-toolbar">
+        <div class="logs-toolbar-left">
+          <select class="logs-filter-select" id="logLevelFilter">
+            <option value="all">All Levels</option>
+            <option value="success">Success</option>
+            <option value="error">Error</option>
+            <option value="warn">Warning</option>
+            <option value="info">Info</option>
+          </select>
+          <select class="logs-filter-select" id="logCategoryFilter">
+            <option value="all">All Categories</option>
+          </select>
+          <input type="text" class="search-input logs-search" id="logSearchInput" placeholder="Search logs..." />
+        </div>
+        <div class="logs-toolbar-right">
+          <span class="snippet-count" id="logCount">0 entries</span>
+          <button class="btn btn-secondary btn-sm" id="btnRefreshLogs" title="Refresh">&#8635; Refresh</button>
+          <button class="btn btn-danger btn-sm" id="btnClearLogs" title="Clear all logs">&#128465; Clear</button>
+        </div>
+      </div>
+
+      <div class="logs-container" id="logsContainer">
+        <div class="logs-list" id="logsList">
+          <div class="empty-state" id="logsEmptyState" style="display:none">
+            <div class="empty-icon">&#128220;</div>
+            <h3>No log entries</h3>
+            <p>Application events will appear here as they happen.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="log-detail-overlay" id="logDetailOverlay" style="display:none">
+        <div class="log-detail-box">
+          <div class="log-detail-header">
+            <span class="log-detail-title" id="logDetailTitle">Log Detail</span>
+            <button class="btn btn-secondary btn-sm" id="btnCloseLogDetail">&times;</button>
+          </div>
+          <div class="log-detail-body" id="logDetailBody"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Opportunity Add/Edit Modal -->
+    <div class="modal-overlay" id="oppModal" style="display:none">
+      <div class="modal-box">
+        <div class="modal-title" id="oppModalTitle">Add Opportunity</div>
+        <div class="modal-error" id="oppModalError"></div>
+        <div class="modal-field">
+          <label>Opportunity Number *</label>
+          <input type="text" id="oppModalNumber" placeholder="e.g. OPP-2026-0042" maxlength="60" />
+        </div>
+        <div class="modal-field">
+          <label>Account Name *</label>
+          <input type="text" id="oppModalAccount" placeholder="e.g. Acme Corp" maxlength="100" />
+        </div>
+        <div class="modal-field">
+          <label>Contact Name</label>
+          <input type="text" id="oppModalContact" placeholder="e.g. Jane Smith" maxlength="100" />
+        </div>
+        <div class="modal-field">
+          <label>Notes</label>
+          <textarea id="oppModalNotes" placeholder="Optional notes..." rows="2"></textarea>
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" id="oppModalCancel">Cancel</button>
+          <button class="btn btn-primary" id="oppModalSave">Save</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="snippetManager.js"></script>
+</body>
+</html>

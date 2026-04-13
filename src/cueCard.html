@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Cue Card</title>
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    #cardContainer {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      border-radius: 10px;
+      overflow: hidden;
+      background: rgba(20, 20, 28, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+      display: flex;
+      flex-direction: column;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      color: #e0e0e0;
+      -webkit-app-region: drag;
+    }
+
+    #cardTitle {
+      padding: 10px 14px 4px;
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: 0.3px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    #cardBody {
+      flex: 1;
+      padding: 4px 14px 8px;
+      font-size: 12px;
+      line-height: 1.55;
+      color: #c8c8d0;
+      overflow-y: auto;
+      -webkit-app-region: no-drag;
+    }
+
+    #cardBody strong {
+      color: #fff;
+      font-weight: 600;
+    }
+
+    #cardNav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 14px 8px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 10px;
+      color: #888;
+      -webkit-app-region: no-drag;
+    }
+
+    #cardNav button {
+      background: rgba(255, 255, 255, 0.08);
+      border: none;
+      color: #bbb;
+      font-size: 12px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    #cardNav button:hover {
+      background: rgba(255, 255, 255, 0.18);
+      color: #fff;
+    }
+
+    #cardNav button:disabled {
+      opacity: 0.3;
+      cursor: default;
+    }
+
+    #setName {
+      font-size: 9px;
+      color: #666;
+      padding: 4px 14px 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Slide animation */
+    .slide-left-enter {
+      animation: slideLeftIn 0.2s ease forwards;
+    }
+    .slide-right-enter {
+      animation: slideRightIn 0.2s ease forwards;
+    }
+
+    @keyframes slideLeftIn {
+      from { transform: translateX(30px); opacity: 0; }
+      to   { transform: translateX(0);    opacity: 1; }
+    }
+    @keyframes slideRightIn {
+      from { transform: translateX(-30px); opacity: 0; }
+      to   { transform: translateX(0);     opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <div id="cardContainer">
+    <div id="setName"></div>
+    <div id="cardTitle">No Cards</div>
+    <div id="cardBody">Add cue cards in the Snippet Manager.</div>
+    <div id="cardNav">
+      <button id="prevBtn" disabled>&larr;</button>
+      <span id="cardCounter">0 of 0</span>
+      <button id="nextBtn" disabled>&rarr;</button>
+    </div>
+  </div>
+
+  <script>
+    'use strict';
+
+    const titleEl   = document.getElementById('cardTitle');
+    const bodyEl    = document.getElementById('cardBody');
+    const counterEl = document.getElementById('cardCounter');
+    const setNameEl = document.getElementById('setName');
+    const prevBtn   = document.getElementById('prevBtn');
+    const nextBtn   = document.getElementById('nextBtn');
+
+    let cards = [];
+    let currentIndex = 0;
+
+    function renderCard(direction) {
+      if (cards.length === 0) {
+        titleEl.textContent   = 'No Cards';
+        bodyEl.innerHTML      = 'Add cue cards in the Snippet Manager.';
+        counterEl.textContent = '0 of 0';
+        prevBtn.disabled = true;
+        nextBtn.disabled = true;
+        return;
+      }
+
+      const card = cards[currentIndex];
+      titleEl.textContent = card.title || '(Untitled)';
+
+      // Minimal markdown: **bold** and line breaks
+      let html = (card.body || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\n/g, '<br>');
+      bodyEl.innerHTML = html;
+
+      counterEl.textContent = `${currentIndex + 1} of ${cards.length}`;
+      prevBtn.disabled = currentIndex === 0;
+      nextBtn.disabled = currentIndex === cards.length - 1;
+
+      // Slide animation
+      if (direction) {
+        const cls = direction === 'next' ? 'slide-left-enter' : 'slide-right-enter';
+        bodyEl.classList.remove('slide-left-enter', 'slide-right-enter');
+        // Force reflow to restart animation
+        void bodyEl.offsetWidth;
+        bodyEl.classList.add(cls);
+      }
+    }
+
+    // IPC: receive full card set
+    window.cueCardAPI.onCardsLoaded(({ cards: newCards, setName, index }) => {
+      cards = newCards || [];
+      currentIndex = (index !== undefined && index >= 0 && index < cards.length) ? index : 0;
+      setNameEl.textContent = setName || '';
+      renderCard(null);
+    });
+
+    // IPC: navigate
+    window.cueCardAPI.onNavigate(({ direction }) => {
+      if (direction === 'next' && currentIndex < cards.length - 1) {
+        currentIndex++;
+        renderCard('next');
+      } else if (direction === 'prev' && currentIndex > 0) {
+        currentIndex--;
+        renderCard('prev');
+      }
+    });
+
+    // IPC: set changed (reload)
+    window.cueCardAPI.onSetChanged(({ cards: newCards, setName }) => {
+      cards = newCards || [];
+      currentIndex = 0;
+      setNameEl.textContent = setName || '';
+      renderCard(null);
+    });
+
+    // Local nav buttons
+    prevBtn.addEventListener('click', () => {
+      if (currentIndex > 0) {
+        currentIndex--;
+        renderCard('prev');
+      }
+    });
+
+    nextBtn.addEventListener('click', () => {
+      if (currentIndex < cards.length - 1) {
+        currentIndex++;
+        renderCard('next');
+      }
+    });
+  </script>
+</body>
+</html>
