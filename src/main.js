@@ -505,6 +505,7 @@ async function startRecordingWithOpportunity(opportunityId) {
   try {
     await audioCapture.startCapture();
     console.log('[main] Audio capture started for:', result.recordingId);
+    appLogger.success('recording', 'Recording started', { recordingId: result.recordingId, opportunityId });
 
     // S1-5: Start memory-pressure monitor during recording
     memoryMonitor.start({
@@ -535,6 +536,7 @@ async function startRecordingWithOpportunity(opportunityId) {
     }, 1000);
   } catch (err) {
     console.error('[main] Failed to start audio capture:', err.message);
+    appLogger.error('recording', 'Failed to start capture', { error: err.message });
     recordingManager.cancelRecording();
     broadcastRecordingState();
 
@@ -560,6 +562,12 @@ async function startRecordingWithOpportunity(opportunityId) {
 async function stopRecordingFlow() {
   const stopResult = recordingManager.stopRecording();
   if (!stopResult) return;
+
+  appLogger.info('recording', 'Recording stopped', {
+    recordingId: stopResult.recordingId,
+    duration: stopResult.duration,
+    filename: stopResult.filename
+  });
 
   // S1-5: Stop memory-pressure monitor
   memoryMonitor.stop();
@@ -591,8 +599,13 @@ async function stopRecordingFlow() {
         console.log('[main] WAV output ready:', converted.wavPath);
         wavFilePath = converted.wavPath;
       }
+      appLogger.success('recording', 'Post-processing complete', {
+        mp4: !!converted.mp4Path,
+        wav: !!converted.wavPath
+      });
     } catch (convErr) {
       console.error('[main] Post-processing failed:', convErr.message);
+      appLogger.error('recording', 'Post-processing failed', { error: convErr.message });
     }
 
     // Create transcript entry and enqueue transcription if auto-transcribe is on
@@ -607,6 +620,7 @@ async function stopRecordingFlow() {
       const transcriptionFile = wavFilePath || captureResult.filePath;
       if (!fs.existsSync(transcriptionFile)) {
         console.error('[main] Transcription file does not exist:', transcriptionFile);
+        appLogger.error('transcription', 'Audio file missing for transcription', { path: transcriptionFile });
         if (snippetManagerWindow && !snippetManagerWindow.isDestroyed()) {
           snippetManagerWindow.webContents.send('recording-error', {
             message: 'Recording file not found for transcription. Check disk space and permissions.'
@@ -995,7 +1009,7 @@ function createSnippetManagerWindow() {
       nodeIntegration:  false,
       contextIsolation: true,
       preload:          path.join(__dirname, 'preload.js'),
-      devTools:         process.env.NODE_ENV === 'development'
+      devTools:         true
     }
   });
 
@@ -1373,8 +1387,10 @@ ipcMain.handle('clear-logs', () => {
 // ── Model Download IPC ──────────────────────────────────────────────────
 ipcMain.handle('download-model', async (_event, modelId) => {
   try {
+    const resolvedId = modelId || transcriptionConfig.get('modelId') || 'Xenova/whisper-base.en';
+    appLogger.info('transcription', 'Model download started', { modelId: resolvedId });
     const provider = new WhisperProvider({
-      modelId: modelId || transcriptionConfig.get('modelId') || 'Xenova/whisper-base.en',
+      modelId: resolvedId,
       modelsDir: path.join(userDataPath, 'models')
     });
 
@@ -1385,9 +1401,11 @@ ipcMain.handle('download-model', async (_event, modelId) => {
       }
     });
 
+    appLogger.success('transcription', 'Model download complete', { modelId: resolvedId });
     return { success: true };
   } catch (e) {
     console.error('[main] Model download failed:', e.message);
+    appLogger.error('transcription', 'Model download failed', { error: e.message });
     return { success: false, error: e.message };
   }
 });
@@ -1649,18 +1667,20 @@ app.whenReady().then(() => {
       : null;
     if (ffmpegCheck) {
       console.log('[startup] ffmpeg found:', ffmpegCheck);
+      appLogger.info('startup', 'ffmpeg found', { path: ffmpegCheck });
     } else {
       console.warn('[startup] WARNING: ffmpeg not found. Recording post-processing and transcription will not work.');
-      console.warn('[startup]   Install with:  brew install ffmpeg');
+      appLogger.warn('startup', 'ffmpeg not found — install with: brew install ffmpeg');
     }
 
     // Check @xenova/transformers
     try {
       require('@xenova/transformers');
       console.log('[startup] @xenova/transformers available');
+      appLogger.info('startup', '@xenova/transformers available');
     } catch (_) {
       console.warn('[startup] WARNING: @xenova/transformers not found. Transcription will not work.');
-      console.warn('[startup]   Install with:  npm install @xenova/transformers');
+      appLogger.warn('startup', '@xenova/transformers not found — install with: npm install @xenova/transformers');
     }
   }
 
@@ -1683,6 +1703,7 @@ app.whenReady().then(() => {
 
   transcriptionQueue.on('job-completed', ({ transcriptId }) => {
     console.log('[main] Transcription completed:', transcriptId);
+    appLogger.success('transcription', 'Transcription completed', { transcriptId });
     // Notify snippet manager if open
     if (snippetManagerWindow && !snippetManagerWindow.isDestroyed()) {
       snippetManagerWindow.webContents.send('transcription-progress', {
@@ -1701,6 +1722,7 @@ app.whenReady().then(() => {
 
   transcriptionQueue.on('job-failed', ({ transcriptId, error }) => {
     console.log('[main] Transcription failed:', transcriptId, error);
+    appLogger.error('transcription', 'Transcription failed', { transcriptId, error });
     if (snippetManagerWindow && !snippetManagerWindow.isDestroyed()) {
       snippetManagerWindow.webContents.send('transcription-progress', {
         transcriptId,

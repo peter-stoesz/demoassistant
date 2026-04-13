@@ -14,6 +14,10 @@ const fs   = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
+// Optional: appLogger for structured logging
+let appLogger = null;
+try { appLogger = require('./appLogger'); } catch (_) {}
+
 let dataFilePath = '';
 
 // ─── Initialisation ──────────────────────────────────────────────────────────
@@ -82,6 +86,7 @@ function addOpportunity({ opportunityNumber, accountName, contactName, notes }) 
 
   list.push(opportunity);
   saveOpportunities(list);
+  if (appLogger) appLogger.info('data', 'Opportunity added', { id: opportunity.id, number: opportunity.opportunityNumber });
   return opportunity;
 }
 

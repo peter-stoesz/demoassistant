@@ -18,6 +18,10 @@ const path = require('path');
 const { EventEmitter } = require('events');
 const { transcribeChunked } = require('./chunkedTranscriber');
 
+// Optional: appLogger for structured logging (graceful if not initialised)
+let appLogger = null;
+try { appLogger = require('../appLogger'); } catch (_) {}
+
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 /**
@@ -77,6 +81,7 @@ class TranscriptionQueue extends EventEmitter {
     this.jobs.push(job);
     this._persistQueue();
     console.log(`[TranscriptionQueue] Job enqueued: ${job.transcriptId}`);
+    if (appLogger) appLogger.info('transcription', 'Job enqueued', { transcriptId: job.transcriptId });
     if (!this.processing) {
       setImmediate(() => this._processNext());
     }
@@ -139,6 +144,7 @@ class TranscriptionQueue extends EventEmitter {
     const job = this.currentJob;
 
     console.log(`[TranscriptionQueue] Starting job: ${job.transcriptId}`);
+    if (appLogger) appLogger.info('transcription', 'Job started', { transcriptId: job.transcriptId });
     this.emit('job-started', job);
 
     try {
