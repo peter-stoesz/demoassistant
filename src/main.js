@@ -1596,7 +1596,7 @@ app.on('will-quit', () => {
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
 
   // Initialise the application logger
@@ -1673,9 +1673,9 @@ app.whenReady().then(() => {
       appLogger.warn('startup', 'ffmpeg not found — install with: brew install ffmpeg');
     }
 
-    // Check @xenova/transformers
+    // Check @xenova/transformers (ESM-only package — must use dynamic import)
     try {
-      require('@xenova/transformers');
+      await import('@xenova/transformers');
       console.log('[startup] @xenova/transformers available');
       appLogger.info('startup', '@xenova/transformers available');
     } catch (_) {

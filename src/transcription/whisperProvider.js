@@ -149,8 +149,7 @@ class WhisperProvider extends TranscriptionProvider {
     if (!this.pipeline) return false;
     if (!this.transformers) {
       try {
-        require('@xenova/transformers');
-        this.transformers = require('@xenova/transformers');
+        this.transformers = await import('@xenova/transformers');
         return true;
       } catch {
         return false;
@@ -167,8 +166,8 @@ class WhisperProvider extends TranscriptionProvider {
    */
   async setup(onProgress) {
     try {
-      // Import transformers library
-      this.transformers = require('@xenova/transformers');
+      // Import transformers library (ESM-only package — must use dynamic import)
+      this.transformers = await import('@xenova/transformers');
       const { pipeline, env } = this.transformers;
 
       // Set cache directory if provided
@@ -223,7 +222,7 @@ class WhisperProvider extends TranscriptionProvider {
         });
       }
     } catch (error) {
-      if (error.code === 'MODULE_NOT_FOUND' || error.message.includes('@xenova/transformers')) {
+      if (error.code === 'MODULE_NOT_FOUND' || error.code === 'ERR_REQUIRE_ESM' || error.message.includes('@xenova/transformers')) {
         throw new Error(
           'Transcription engine not found. Please install @xenova/transformers:\n' +
           'npm install @xenova/transformers'

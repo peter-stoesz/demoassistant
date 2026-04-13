@@ -4,6 +4,19 @@
 
 ---
 
+## 2026-04-13 — Fix @xenova/transformers ESM Import Error
+
+**Problem:** Both model download and transcription failed with "Transcription engine not found" because the code used `require('@xenova/transformers')` but the package declares `"type": "module"` in its package.json, making it ESM-only. Node's `require()` cannot load ESM packages and throws MODULE_NOT_FOUND or ERR_REQUIRE_ESM.
+**Changes:**
+- Changed `require('@xenova/transformers')` to `await import('@xenova/transformers')` in `whisperProvider.js` `setup()` method (line 170) and `isReady()` method (line 152)
+- Changed `require('@xenova/transformers')` to `await import('@xenova/transformers')` in `main.js` startup pre-flight check (line 1678)
+- Made `app.whenReady()` callback `async` so `await import()` is valid in the pre-flight block
+- Added `ERR_REQUIRE_ESM` to the error code check in `setup()` catch block for better error detection
+
+**Files modified:** `src/transcription/whisperProvider.js`, `src/main.js`
+
+---
+
 ## 2026-04-13 — Sprint 3: Wire appLogger into Core Modules
 
 **Commit:** `302e00b`
